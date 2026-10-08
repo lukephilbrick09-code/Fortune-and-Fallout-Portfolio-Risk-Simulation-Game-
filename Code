@@ -1,0 +1,54 @@
+#version1
+
+import random
+
+Portfolio = 100000
+years = 10
+game = str("GO")
+
+StockReturn = random.uniform(-0.30, 0.40)
+BondReturn = random.uniform(-0.05, 0.10)
+GoldReturn = random.uniform(-0.15, 0.20)
+CashReturn = random.uniform(0.00, 0.04)
+
+BondPie = 0
+GoldPie = 0
+CashPie = 0
+StockPie = 0
+
+for x in range(years):
+    if game == "GO":
+       print("You have " + str(Portfolio) + " to invest. You must make profit otherwise you fail. Your investments must make up to or less than 100%. You cannot go over 100%. Anything not put into stocks,bonds or gold will be put into cash.")
+       StockPie = int(input("What percentage of your portfolio do you want to put into stocks?: "))
+       BondPie = int(input("What percentage of your portfolio do you want to put into bonds?: "))
+       GoldPie = int(input("What percentage of your portfolio do you want to put into gold?: "))
+       CashPie = 100 - StockPie - BondPie - GoldPie
+       print("Cash:", CashPie, "%")
+
+
+       TotalPie = StockPie + BondPie + GoldPie + CashPie
+       if TotalPie == 100:
+           print("Portfolio allocation accepted!")
+       else:
+           print("Your allocation must total to 100%")
+
+       BondCapitalGL = (Portfolio*(BondPie/100)) * (1+BondReturn)
+       StockCapitalGL = (Portfolio*(StockPie/100)) * (1+StockReturn)
+       GoldCapitalGL = (Portfolio*(GoldPie/100)) * (1+GoldReturn)
+       CashCapitalGL = (Portfolio*(CashPie/100)) * (1+StockReturn)
+
+       # Print individual assets
+       print(f"Your bonds are now worth ${BondCapitalGL:,.2f}")
+       print(f"Your stocks are now worth ${StockCapitalGL:,.2f}")
+       print(f"Your gold is now worth ${GoldCapitalGL:,.2f}")
+       print(f"Your cash is now worth ${CashCapitalGL:,.2f}")
+
+       # Print total portfolio value
+       Portfolio = GoldCapitalGL + CashCapitalGL + BondCapitalGL + StockCapitalGL
+       print(f"Your total portfolio is now worth ${Portfolio:,.2f}")
+
+
+
+
+
+
