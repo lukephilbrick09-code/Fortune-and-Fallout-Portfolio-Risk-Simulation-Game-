@@ -44,7 +44,7 @@ for x in range(years):
 
             CashPie = 100 - StockPie - BondPie - GoldPie
 
-            if CashPie >0 :
+            if CashPie >= 0 :
                 print("Portfolio allocation accepted!")
                 print("Cash:", CashPie, "%")
                 break
