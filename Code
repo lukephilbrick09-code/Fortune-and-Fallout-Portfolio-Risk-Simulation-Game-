@@ -1,11 +1,15 @@
-#version2
+#version3
 
 import random
 
 
+import random
+
+MarketEvents = ["Bull market", "Market crash", "High inflation", "Gold rally", "No event"]
+
 def portfolio_percentage(asset):
    while True:
-      playerinput = (input(f"What percentage of your portfolio do you want to put into {asset}?"))
+      playerinput = (input(f"What percentage of your portfolio do you want to put into {asset}?")).strip()
       if playerinput.isdigit():
          value = int(playerinput)
          if 0 <= value <= 100:
@@ -16,15 +20,10 @@ def portfolio_percentage(asset):
             print("Please enter a valid whole number! Try again.")
       pass
 
-Portfolio = 100000
+StartingPortfolio = 100000
+Portfolio = StartingPortfolio
 years = 10
 game = str("GO")
-
-StockReturn = random.uniform(-0.30, 0.40)
-BondReturn = random.uniform(-0.05, 0.10)
-GoldReturn = random.uniform(-0.15, 0.20)
-CashReturn = random.uniform(0.00, 0.04)
-
 BondPie = -1
 GoldPie = -1
 CashPie = -1
@@ -32,43 +31,78 @@ StockPie = -1
 
 for x in range(years):
     if game == "GO":
+
+        #non event returns
         StockReturn = random.uniform(-0.30, 0.40)
         BondReturn = random.uniform(-0.05, 0.10)
         GoldReturn = random.uniform(-0.15, 0.20)
-        CashReturn = random.uniform(0.00, 0.04)
+        CashReturn = random.uniform(-0.01, 0.04)
 
-        while True:
-            StockPie = portfolio_percentage("stocks")
-            BondPie = portfolio_percentage("bonds")
-            GoldPie = portfolio_percentage("gold")
+        #Market event + new returns
+        MarketEvent = random.choices(MarketEvents, weights=(15, 5, 10, 20, 50), k=1)
 
-            CashPie = 100 - StockPie - BondPie - GoldPie
+        print(" Market Event Occuring: " + MarketEvent[0])
+        if MarketEvent[0] == "Bull market":
+            StockReturn = random.uniform(-0.05, 0.50)
+            GoldReturn = random.uniform(-0.05, 0.10)
+        elif MarketEvent[0] == "Market crash":
+            StockReturn = random.uniform(-0.50, 0.05)
+            GoldReturn = random.uniform(-0.05, 0.25)
+            BondReturn = random.uniform(-0.05, 0.15)
+            CashReturn = random.uniform(0.00, 0.05)
+        elif MarketEvent[0] == "High inflation":
+            StockReturn = random.uniform(-0.45, 0.15)
+            BondReturn = random.uniform(-0.15, 0.00)
+            GoldReturn = random.uniform(0.05, 0.45)
+            CashReturn = random.uniform(-0.08, -0.02)
+        elif MarketEvent[0] == "Gold rally":
+            StockReturn = random.uniform(-0.10, 0.25)
+            BondReturn = random.uniform(-0.05, 0.10)
+            GoldReturn = random.uniform(0.15, 0.50)
+            CashReturn = random.uniform(0.00, 0.04)
 
-            if CashPie >= 0 :
-                print("Portfolio allocation accepted!")
-                print("Cash:", CashPie, "%")
-                break
-            else:
-                print("You cannot invest more than 100%! Try again.")
+        elif MarketEvent[0] == "No event":
+            StockReturn = random.uniform(-0.30, 0.40)
+            BondReturn = random.uniform(-0.05, 0.10)
+            GoldReturn = random.uniform(-0.15, 0.20)
+            CashReturn = random.uniform(0.00, 0.04)
 
-        TotalPie = StockPie + BondPie + GoldPie + CashPie
+    while True:
+        StockPie = portfolio_percentage("stocks")
+        BondPie = portfolio_percentage("bonds")
+        GoldPie = portfolio_percentage("gold")
+
+        CashPie = 100 - StockPie - BondPie - GoldPie
+
+        if CashPie >=0 :
+            print("Portfolio allocation accepted!")
+            print("Cash:", CashPie, "%")
+            break
+        else:
+            print("You cannot invest more than 100%! Try again.")
+
+    TotalPie = StockPie + BondPie + GoldPie + CashPie
 
 
 
-        BondCapitalGL = (Portfolio * (BondPie / 100)) * (1 + BondReturn)
-        StockCapitalGL = (Portfolio * (StockPie / 100)) * (1 + StockReturn)
-        GoldCapitalGL = (Portfolio * (GoldPie / 100)) * (1 + GoldReturn)
-        CashCapitalGL = (Portfolio * (CashPie / 100)) * (1 + CashReturn)
+    BondCapitalGL = (Portfolio * (BondPie / 100)) * (1 + BondReturn)
+    StockCapitalGL = (Portfolio * (StockPie / 100)) * (1 + StockReturn)
+    GoldCapitalGL = (Portfolio * (GoldPie / 100)) * (1 + GoldReturn)
+    CashCapitalGL = (Portfolio * (CashPie / 100)) * (1 + CashReturn)
 
-        # Print individual assets
-        print(f"Your bonds are now worth ${BondCapitalGL:,.2f}")
-        print(f"Your stocks are now worth ${StockCapitalGL:,.2f}")
-        print(f"Your gold is now worth ${GoldCapitalGL:,.2f}")
-        print(f"Your cash is now worth ${CashCapitalGL:,.2f}")
+    # Print individual assets
+    print(f"Your bonds are now worth ${BondCapitalGL:,.2f}")
+    print(f"Your stocks are now worth ${StockCapitalGL:,.2f}")
+    print(f"Your gold is now worth ${GoldCapitalGL:,.2f}")
+    print(f"Your cash is now worth ${CashCapitalGL:,.2f}")
 
-        # Print total portfolio value
-        Portfolio = sum([BondCapitalGL, StockCapitalGL, GoldCapitalGL, CashCapitalGL])
-        print(f"Your total portfolio is now worth ${Portfolio:,.2f}")
+    # Print total portfolio value
+    Portfolio = sum([BondCapitalGL, StockCapitalGL, GoldCapitalGL, CashCapitalGL])
+    print(f"Your total portfolio is now worth ${Portfolio:,.2f}")
+
+    #calculate total portfolio gains
+    totalgain = Portfolio - StartingPortfolio
+    print(f"Your total gains have been ${totalgain:,.2f}")
 
 
 
