@@ -1,11 +1,23 @@
-#version3
-
-import random
-
+#version4
 
 import random
 
 MarketEvents = ["Bull market", "Market crash", "High inflation", "Gold rally", "No event"]
+
+def stock_percentage(stock):
+    while True:
+        playerinput = input(f"What percentage of your stock portfolio do you want to put into {stock}? ").strip()
+
+        if playerinput.isdigit():
+            value = int(playerinput)
+
+            if 0 <= value <= 100:
+                return value
+            else:
+                print("Enter a percentage between 0 and 100!")
+        else:
+            print("Please enter a valid whole number! Try again.")
+
 
 def portfolio_percentage(asset):
    while True:
@@ -28,6 +40,7 @@ BondPie = -1
 GoldPie = -1
 CashPie = -1
 StockPie = -1
+RealEstatePie = -1
 
 for x in range(years):
     if game == "GO":
@@ -37,6 +50,11 @@ for x in range(years):
         BondReturn = random.uniform(-0.05, 0.10)
         GoldReturn = random.uniform(-0.15, 0.20)
         CashReturn = random.uniform(-0.01, 0.04)
+        RealEstateReturn = random.uniform(-0.10, 0.15)
+
+        BHRDReturn = random.uniform(-0.25, 0.30)
+        BPOPReturn = random.uniform(-0.12, 0.18)
+        MDTAReturn = random.uniform(-0.40, 0.55)
 
         #Market event + new returns
         MarketEvent = random.choices(MarketEvents, weights=(15, 5, 10, 20, 50), k=1)
@@ -45,67 +63,126 @@ for x in range(years):
         if MarketEvent[0] == "Bull market":
             StockReturn = random.uniform(-0.05, 0.50)
             GoldReturn = random.uniform(-0.05, 0.10)
+            RealEstateReturn = random.uniform(0.00, 0.20)
+
+            BHRDReturn = random.uniform(-0.05, 0.40)
+            BPOPReturn = random.uniform(0.00, 0.22)
+            MDTAReturn = random.uniform(-0.10, 0.70)
+
         elif MarketEvent[0] == "Market crash":
             StockReturn = random.uniform(-0.50, 0.05)
             GoldReturn = random.uniform(-0.05, 0.25)
             BondReturn = random.uniform(-0.05, 0.15)
             CashReturn = random.uniform(0.00, 0.05)
+            RealEstateReturn = random.uniform(-0.25, 0.02)
+
+            BHRDReturn = random.uniform(-0.45, 0.05)
+            BPOPReturn = random.uniform(-0.25, 0.05)
+            MDTAReturn = random.uniform(-0.65, 0.10)
+
         elif MarketEvent[0] == "High inflation":
             StockReturn = random.uniform(-0.45, 0.15)
             BondReturn = random.uniform(-0.15, 0.00)
             GoldReturn = random.uniform(0.05, 0.45)
             CashReturn = random.uniform(-0.08, -0.02)
+            RealEstateReturn = random.uniform(-0.10, 0.20)
+
+            BHRDReturn = random.uniform(-0.35, 0.12)
+            BPOPReturn = random.uniform(-0.20, 0.10)
+            MDTAReturn = random.uniform(-0.50, 0.20)
+
         elif MarketEvent[0] == "Gold rally":
             StockReturn = random.uniform(-0.10, 0.25)
             BondReturn = random.uniform(-0.05, 0.10)
             GoldReturn = random.uniform(0.15, 0.50)
             CashReturn = random.uniform(0.00, 0.04)
+            RealEstateReturn = random.uniform(-0.05, 0.12)
+
+            BHRDReturn = random.uniform(-0.15, 0.25)
+            BPOPReturn = random.uniform(-0.10, 0.15)
+            MDTAReturn = random.uniform(-0.30, 0.35)
 
         elif MarketEvent[0] == "No event":
             StockReturn = random.uniform(-0.30, 0.40)
             BondReturn = random.uniform(-0.05, 0.10)
             GoldReturn = random.uniform(-0.15, 0.20)
             CashReturn = random.uniform(0.00, 0.04)
+            RealEstateReturn = random.uniform(-0.10, 0.15)
+
+            BHRDReturn = random.uniform(-0.25, 0.30)
+            BPOPReturn = random.uniform(-0.12, 0.18)
+            MDTAReturn = random.uniform(-0.40, 0.55)
 
     while True:
         StockPie = portfolio_percentage("stocks")
         BondPie = portfolio_percentage("bonds")
         GoldPie = portfolio_percentage("gold")
+        RealEstatePie = portfolio_percentage("real estate")
 
-        CashPie = 100 - StockPie - BondPie - GoldPie
-
-        if CashPie >=0 :
-            print("Portfolio allocation accepted!")
-            print("Cash:", CashPie, "%")
+        if StockPie + BondPie + GoldPie + RealEstatePie <= 100:
+            CashPie = 100 - StockPie - BondPie - GoldPie - RealEstatePie
             break
         else:
             print("You cannot invest more than 100%! Try again.")
 
-    TotalPie = StockPie + BondPie + GoldPie + CashPie
+    if StockPie > 0:
+        print("The stocks available are:")
+        print("Bighard, BHRD - a large established tech company which holds medium risk and medium reward\nBubblyPop, BPOP - another established popular consumer stock that is in a slowly growing market, yielding less risk and reward.\nMudita, MDTA-  an AI and semiconductor growth stock. Highly established in a rapidly growing market. Very high reward, very high risk.")
 
+        while True:
+            BHRDPie = stock_percentage("BHRD")
+            BPOPPie = stock_percentage("BPOP")
+            MDTAPie = stock_percentage("MDTA")
 
+            if BHRDPie + BPOPPie + MDTAPie == 100:
+                break
+            else:
+                print("Your stock allocations must add up to exactly 100%. Try again.")
 
+    else:
+        BHRDPie = 0
+        BPOPPie = 0
+        MDTAPie = 0
+
+    TotalPie = StockPie + BondPie + GoldPie + CashPie + RealEstatePie
+
+    #Calculate individual stock values
+    BHRDCapitalGL = (Portfolio * (StockPie / 100) * (BHRDPie / 100)) * (1 + BHRDReturn)
+    BPOPCapitalGL = (Portfolio * (StockPie / 100) * (BPOPPie / 100)) * (1 + BPOPReturn)
+    MDTACapitalGL = (Portfolio * (StockPie / 100) * (MDTAPie / 100)) * (1 + MDTAReturn)
+
+    #Calculate total stock value
+    StockCapitalGL = BHRDCapitalGL + BPOPCapitalGL + MDTACapitalGL
+
+    #Calculate other asset values
     BondCapitalGL = (Portfolio * (BondPie / 100)) * (1 + BondReturn)
-    StockCapitalGL = (Portfolio * (StockPie / 100)) * (1 + StockReturn)
     GoldCapitalGL = (Portfolio * (GoldPie / 100)) * (1 + GoldReturn)
     CashCapitalGL = (Portfolio * (CashPie / 100)) * (1 + CashReturn)
+    RealEstateCapitalGL = (Portfolio * (RealEstatePie / 100)) * (1 + RealEstateReturn)
 
     # Print individual assets
-    print(f"Your bonds are now worth ${BondCapitalGL:,.2f}")
-    print(f"Your stocks are now worth ${StockCapitalGL:,.2f}")
-    print(f"Your gold is now worth ${GoldCapitalGL:,.2f}")
-    print(f"Your cash is now worth ${CashCapitalGL:,.2f}")
+    print(f"Your BHRD stocks are now worth £{BHRDCapitalGL:,.2f}")
+    print(f"Your BPOP stocks are now worth £{BPOPCapitalGL:,.2f}")
+    print(f"Your MDTA stocks are now worth £{MDTACapitalGL:,.2f}")
+    print(f"Your total stocks are now worth £{StockCapitalGL:,.2f}")
+    print(f"Your bonds are now worth £{BondCapitalGL:,.2f}")
+    print(f"Your gold is now worth £{GoldCapitalGL:,.2f}")
+    print(f"Your cash is now worth £{CashCapitalGL:,.2f}")
+    print(f"Your real estate is now worth £{RealEstateCapitalGL:,.2f}")
 
     # Print total portfolio value
-    Portfolio = sum([BondCapitalGL, StockCapitalGL, GoldCapitalGL, CashCapitalGL])
-    print(f"Your total portfolio is now worth ${Portfolio:,.2f}")
+    Portfolio = sum([StockCapitalGL, BondCapitalGL, GoldCapitalGL, CashCapitalGL, RealEstateCapitalGL])
+    print(f"Your total portfolio is now worth £{Portfolio:,.2f}")
 
     #calculate total portfolio gains
     totalgain = Portfolio - StartingPortfolio
-    print(f"Your total gains have been ${totalgain:,.2f}")
+    print(f"Your total gains have been £{totalgain:,.2f}")
 
-
-
+print("\nGAME OVER")
+print(f"Starting portfolio: £{StartingPortfolio:,.2f}")
+print(f"Final portfolio: £{Portfolio:,.2f}")
+print(f"Total gains/losses: £{Portfolio - StartingPortfolio:,.2f}")
+print(f"Total return: {((Portfolio / StartingPortfolio) - 1) * 100:.2f}%")
 
 
 
