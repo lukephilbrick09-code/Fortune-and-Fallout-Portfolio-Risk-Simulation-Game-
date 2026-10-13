@@ -1,5 +1,7 @@
 #version5
-#version5
+
+import pygame
+
 
 import random
 
@@ -38,8 +40,12 @@ def generate_return(mean, volatility):
     return max(-0.95, random.gauss(mean, volatility))
 
 
-StartingPortfolio = 100000
-Portfolio = StartingPortfolio
+StartingPortfolio = random.randint(80000,120000)
+
+MyPortfolio = StartingPortfolio
+
+
+
 years = 10
 game = str("GO")
 BondPie = -1
@@ -53,8 +59,8 @@ YearlySummary = []
 
 for x in range(years):
     print(f"\n===== Year {x + 1} of {years} =====")
-    PreviousPortfolio = Portfolio
-    print(f"Portfolio at start of year: £{Portfolio:,.2f}")
+    PreviousPortfolio = MyPortfolio
+    print(f"Portfolio at start of year: £{MyPortfolio:,.2f}")
 
     if game == "GO":
 
@@ -190,7 +196,19 @@ for x in range(years):
 
             while True:
                 BHRDPie = stock_percentage("BHRD")
+                if BHRDPie == 100:
+                    BPOPPie = 0
+                    MDTAPie = 0
+                    break
+                elif BHRDPie < 100:
+                    print("You have " + str(100 - BHRDPie) + " % of your portfolio allocated to stocks left.")
                 BPOPPie = stock_percentage("BPOP")
+                if BPOPPie == 100:
+                    BHRDPie = 0
+                    MDTAPie = 0
+                    break
+                elif BPOPPie < 100:
+                    print("You have " + str(100 - BHRDPie - BPOPPie) + " % of your portfolio allocated to stocks left.")
                 MDTAPie = stock_percentage("MDTA")
 
                 if BHRDPie + BPOPPie + MDTAPie == 100:
@@ -219,18 +237,18 @@ for x in range(years):
     TotalPie = StockPie + BondPie + GoldPie + CashPie + RealEstatePie
 
     # Calculate individual stock values
-    BHRDCapitalGL = (Portfolio * (StockPie / 100) * (BHRDPie / 100)) * (1 + BHRDReturn)
-    BPOPCapitalGL = (Portfolio * (StockPie / 100) * (BPOPPie / 100)) * (1 + BPOPReturn)
-    MDTACapitalGL = (Portfolio * (StockPie / 100) * (MDTAPie / 100)) * (1 + MDTAReturn)
+    BHRDCapitalGL = (MyPortfolio * (StockPie / 100) * (BHRDPie / 100)) * (1 + BHRDReturn)
+    BPOPCapitalGL = (MyPortfolio * (StockPie / 100) * (BPOPPie / 100)) * (1 + BPOPReturn)
+    MDTACapitalGL = (MyPortfolio * (StockPie / 100) * (MDTAPie / 100)) * (1 + MDTAReturn)
 
     # Calculate total stock value
     StockCapitalGL = BHRDCapitalGL + BPOPCapitalGL + MDTACapitalGL
 
     # Calculate other asset values
-    BondCapitalGL = (Portfolio * (BondPie / 100)) * (1 + BondReturn)
-    GoldCapitalGL = (Portfolio * (GoldPie / 100)) * (1 + GoldReturn)
-    CashCapitalGL = (Portfolio * (CashPie / 100)) * (1 + CashReturn)
-    RealEstateCapitalGL = (Portfolio * (RealEstatePie / 100)) * (1 + RealEstateReturn)
+    BondCapitalGL = (MyPortfolio * (BondPie / 100)) * (1 + BondReturn)
+    GoldCapitalGL = (MyPortfolio * (GoldPie / 100)) * (1 + GoldReturn)
+    CashCapitalGL = (MyPortfolio * (CashPie / 100)) * (1 + CashReturn)
+    RealEstateCapitalGL = (MyPortfolio * (RealEstatePie / 100)) * (1 + RealEstateReturn)
 
     # Print individual assets
     print(f"\nYour BHRD stocks are now worth £{BHRDCapitalGL:,.2f}")
@@ -243,12 +261,12 @@ for x in range(years):
     print(f"Your real estate is now worth £{RealEstateCapitalGL:,.2f}")
 
     # Print total portfolio value
-    Portfolio = sum([StockCapitalGL, BondCapitalGL, GoldCapitalGL, CashCapitalGL, RealEstateCapitalGL])
-    print(f"Your total portfolio is now worth £{Portfolio:,.2f}")
+    MyPortfolio = sum([StockCapitalGL, BondCapitalGL, GoldCapitalGL, CashCapitalGL, RealEstateCapitalGL])
+    print(f"Your total portfolio is now worth £{MyPortfolio:,.2f}")
 
     # Calculate total portfolio gains
-    totalgain = Portfolio - StartingPortfolio
-    AnnualGain = Portfolio - PreviousPortfolio
+    totalgain = MyPortfolio - StartingPortfolio
+    AnnualGain = MyPortfolio - PreviousPortfolio
     AnnualReturn = (AnnualGain / PreviousPortfolio) * 100
 
     print(f"Your total gains have been £{totalgain:,.2f}")
@@ -262,15 +280,15 @@ for x in range(years):
         PreviousPortfolio,
         AnnualGain,
         AnnualReturn,
-        Portfolio
+        MyPortfolio
     ])
 
 # Final results
 print("\nGAME OVER")
 print(f"Starting portfolio: £{StartingPortfolio:,.2f}")
-print(f"Final portfolio: £{Portfolio:,.2f}")
-print(f"Total gains/losses: £{Portfolio - StartingPortfolio:,.2f}")
-print(f"Total return: {((Portfolio / StartingPortfolio) - 1) * 100:.2f}%")
+print(f"Final portfolio: £{MyPortfolio:,.2f}")
+print(f"Total gains/losses: £{MyPortfolio - StartingPortfolio:,.2f}")
+print(f"Total return: {((MyPortfolio / StartingPortfolio) - 1) * 100:.2f}%")
 
 # Yearly summary table
 print("\n================ YEARLY SUMMARY ================")
