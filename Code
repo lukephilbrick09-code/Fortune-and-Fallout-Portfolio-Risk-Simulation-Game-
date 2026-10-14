@@ -1,7 +1,5 @@
 #version5
 
-import pygame
-
 
 import random
 
@@ -39,12 +37,36 @@ def portfolio_percentage(asset):
 def generate_return(mean, volatility):
     return max(-0.95, random.gauss(mean, volatility))
 
+def adjust_expected_return(mean, adjustment):
+    return mean + random.uniform(-adjustment, adjustment)
 
 StartingPortfolio = random.randint(80000,120000)
 
 MyPortfolio = StartingPortfolio
 
+#Guardian variables
+GuardianPortfolio = 100000
+GuardianStockPie = 15
+GuardianBondPie = 35
+GuardianGoldPie = 20
+GuardianRealEstatePie = 10
+GuardianCashPie = 100 - GuardianBondPie - GuardianGoldPie - GuardianStockPie - GuardianRealEstatePie
 
+#Strategist variables
+StrategistPortfolio = 100000
+StrategistStockPie = 40
+StrategistBondPie = 25
+StrategistGoldPie = 10
+StrategistRealEstate = 15
+StrategistCashPie = 100 - StrategistBondPie - StrategistGoldPie - StrategistRealEstate - StrategistStockPie
+
+#MaverickPortfolio
+MaverickPortfolio = 100000
+MaverickStockPie = 75
+MaverickBondPie = 5
+MaverickGoldPie = 5
+MaverickRealEstate = 10
+MaverickCashPie = 100 - MaverickBondPie - MaverickGoldPie - MaverickRealEstate - MaverickStockPie
 
 years = 10
 game = str("GO")
@@ -135,8 +157,18 @@ for x in range(years):
             CashMean = 0.02
             RealEstateMean = 0.06
 
-        # Display expected average returns for this market event
-        print("\n--- Expected Average Annual Returns ---")
+        # Adjust expected returns for this specific year
+        BHRDMean = adjust_expected_return(BHRDMean, 0.03)
+        BPOPMean = adjust_expected_return(BPOPMean, 0.02)
+        MDTAMean = adjust_expected_return(MDTAMean, 0.05)
+        StockMean = adjust_expected_return(StockMean, 0.03)
+        BondMean = adjust_expected_return(BondMean, 0.01)
+        GoldMean = adjust_expected_return(GoldMean, 0.03)
+        CashMean = adjust_expected_return(CashMean, 0.005)
+        RealEstateMean = adjust_expected_return(RealEstateMean, 0.02)
+
+        # Display expected annual returns for this year
+        print("\n--- Expected Annual Returns for This Year ---")
         print(f"BHRD: {BHRDMean * 100:.2f}%")
         print(f"BPOP: {BPOPMean * 100:.2f}%")
         print(f"MDTA: {MDTAMean * 100:.2f}%")
@@ -145,10 +177,9 @@ for x in range(years):
         print(f"Gold: {GoldMean * 100:.2f}%")
         print(f"Cash: {CashMean * 100:.2f}%")
         print(f"Real estate: {RealEstateMean * 100:.2f}%")
-        print("These are illustrative averages, not guaranteed returns.")
-        print("Actual returns will vary due to random market movements.")
+        print("These are estimates for this year, not guaranteed returns.")
 
-        # Generate random returns around the expected averages
+        # Generate actual random returns around the adjusted expectations
         BHRDReturn = generate_return(BHRDMean, 0.22)
         BPOPReturn = generate_return(BPOPMean, 0.12)
         MDTAReturn = generate_return(MDTAMean, 0.35)
@@ -158,6 +189,50 @@ for x in range(years):
         GoldReturn = generate_return(GoldMean, 0.15)
         CashReturn = generate_return(CashMean, 0.015)
         RealEstateReturn = generate_return(RealEstateMean, 0.12)
+
+        # Update competitor portfolios using the same market returns
+        # Save each competitor's value at the start of the year
+        GuardianPreviousPortfolio = GuardianPortfolio
+        StrategistPreviousPortfolio = StrategistPortfolio
+        MaverickPreviousPortfolio = MaverickPortfolio
+
+        # The Guardian: conservative
+        GuardianStockValue = GuardianPreviousPortfolio * (GuardianStockPie / 100) * (1 + StockReturn)
+        GuardianBondValue = GuardianPreviousPortfolio * (GuardianBondPie / 100) * (1 + BondReturn)
+        GuardianGoldValue = GuardianPreviousPortfolio * (GuardianGoldPie / 100) * (1 + GoldReturn)
+        GuardianCashValue = GuardianPreviousPortfolio * (GuardianCashPie / 100) * (1 + CashReturn)
+        GuardianRealEstateValue = GuardianPreviousPortfolio * (GuardianRealEstatePie / 100) * (1 + RealEstateReturn)
+        GuardianPortfolio = sum([
+            GuardianStockValue, GuardianBondValue, GuardianGoldValue,
+            GuardianCashValue, GuardianRealEstateValue
+        ])
+
+        # The Strategist: balanced
+        StrategistStockValue = StrategistPreviousPortfolio * (StrategistStockPie / 100) * (1 + StockReturn)
+        StrategistBondValue = StrategistPreviousPortfolio * (StrategistBondPie / 100) * (1 + BondReturn)
+        StrategistGoldValue = StrategistPreviousPortfolio * (StrategistGoldPie / 100) * (1 + GoldReturn)
+        StrategistCashValue = StrategistPreviousPortfolio * (StrategistCashPie / 100) * (1 + CashReturn)
+        StrategistRealEstateValue = StrategistPreviousPortfolio * (StrategistRealEstate / 100) * (1 + RealEstateReturn)
+        StrategistPortfolio = sum([
+            StrategistStockValue, StrategistBondValue, StrategistGoldValue,
+            StrategistCashValue, StrategistRealEstateValue
+        ])
+
+        # The Maverick: aggressive
+        MaverickStockValue = MaverickPreviousPortfolio * (MaverickStockPie / 100) * (1 + StockReturn)
+        MaverickBondValue = MaverickPreviousPortfolio * (MaverickBondPie / 100) * (1 + BondReturn)
+        MaverickGoldValue = MaverickPreviousPortfolio * (MaverickGoldPie / 100) * (1 + GoldReturn)
+        MaverickCashValue = MaverickPreviousPortfolio * (MaverickCashPie / 100) * (1 + CashReturn)
+        MaverickRealEstateValue = MaverickPreviousPortfolio * (MaverickRealEstate / 100) * (1 + RealEstateReturn)
+        MaverickPortfolio = sum([
+            MaverickStockValue, MaverickBondValue, MaverickGoldValue,
+            MaverickCashValue, MaverickRealEstateValue
+        ])
+
+        print("\n--- Competitor Portfolios ---")
+        print(f"The Guardian: £{GuardianPortfolio:,.2f}")
+        print(f"The Strategist: £{StrategistPortfolio:,.2f}")
+        print(f"The Maverick: £{MaverickPortfolio:,.2f}")
 
     # Same allocation feature
     if x > 0:
@@ -185,6 +260,10 @@ for x in range(years):
 
             if StockPie + BondPie + GoldPie + RealEstatePie <= 100:
                 CashPie = 100 - StockPie - BondPie - GoldPie - RealEstatePie
+                if CashPie > 50:
+                    print(f"Cash: {CashPie}%!!!!!")
+                else:
+                    print(f"Cash: {CashPie}%")
                 break
             else:
                 print("You cannot invest more than 100%! Try again.")
@@ -290,6 +369,21 @@ print(f"Final portfolio: £{MyPortfolio:,.2f}")
 print(f"Total gains/losses: £{MyPortfolio - StartingPortfolio:,.2f}")
 print(f"Total return: {((MyPortfolio / StartingPortfolio) - 1) * 100:.2f}%")
 
+# Final competitor leaderboard
+FinalResults = [
+    ("You", MyPortfolio, StartingPortfolio),
+    ("The Guardian", GuardianPortfolio, 100000),
+    ("The Strategist", StrategistPortfolio, 100000),
+    ("The Maverick", MaverickPortfolio, 100000)
+]
+FinalResults.sort(key=lambda result: result[1], reverse=True)
+
+print("\n================ FINAL LEADERBOARD ================")
+for rank, result in enumerate(FinalResults, start=1):
+    Name, FinalValue, InitialValue = result
+    TotalReturn = ((FinalValue / InitialValue) - 1) * 100
+    print(f"{rank}. {Name:<15} £{FinalValue:>12,.2f}   Return: {TotalReturn:>7.2f}%")
+
 # Yearly summary table
 print("\n================ YEARLY SUMMARY ================")
 print(f"{'Year':<8}{'Market Event':<20}{'Start Value':>16}{'Gain/Loss':>16}{'Return':>12}{'End Value':>16}")
@@ -299,4 +393,3 @@ for row in YearlySummary:
     print(f"{row[0]:<8}{row[1]:<20}£{row[2]:>14,.2f}£{row[3]:>14,.2f}{row[4]:>11.2f}%£{row[5]:>14,.2f}")
 
 print("=" * 88)
-
