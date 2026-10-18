@@ -1,0 +1,815 @@
+import math
+import random
+import pygame
+
+# Fortune & Fallout - Version 5 Pygame GUI
+# Requires: pip install pygame
+# Run this file in PyCharm. The game uses the Version 5 return assumptions,
+# market events, competitors, compounding and yearly summary mechanics.
+
+pygame.init()
+pygame.display.set_caption("FORTUNE & FALLOUT // PORTFOLIO RISK SIMULATION")
+
+# ------------------------------ WINDOW / THEME ------------------------------
+
+MIN_WIDTH, MIN_HEIGHT = 1120, 700
+screen = pygame.display.set_mode((1440, 900), pygame.RESIZABLE)
+clock = pygame.time.Clock()
+
+BLACK = (7, 10, 13)
+PANEL = (13, 19, 23)
+PANEL_2 = (19, 27, 31)
+BORDER = (54, 71, 75)
+ORANGE = (255, 151, 45)
+AMBER = (255, 190, 84)
+PALE_GREEN = (176, 224, 177)
+GREEN = (94, 210, 142)
+RED = (255, 89, 89)
+CYAN = (67, 210, 225)
+WHITE = (230, 236, 226)
+MUTED = (130, 151, 151)
+PURPLE = (186, 125, 255)
+PIXEL_BG = (10, 19, 26)
+
+FONT = pygame.font.SysFont("consolas", 16)
+FONT_SMALL = pygame.font.SysFont("consolas", 13)
+FONT_TINY = pygame.font.SysFont("consolas", 11)
+FONT_MED = pygame.font.SysFont("consolas", 20, bold=True)
+FONT_BIG = pygame.font.SysFont("consolas", 28, bold=True)
+FONT_HUGE = pygame.font.SysFont("consolas", 38, bold=True)
+
+MarketEvents = ["Bull market", "Market crash", "High inflation", "Gold rally", "No event"]
+EVENT_WEIGHTS = (15, 5, 10, 20, 50)
+YEARS = 10
+
+# ------------------------------ VERSION 5 GAME LOGIC ------------------------
+
+def generate_return(mean, volatility):
+    return max(-0.95, random.gauss(mean, volatility))
+
+def adjust_expected_return(mean, adjustment):
+    return mean + random.uniform(-adjustment, adjustment)
+
+def get_event_means(event):
+    if event == "Bull market":
+        return {
+            "BHRD": 0.16, "BPOP": 0.09, "MDTA": 0.24, "Stocks overall": 0.16,
+            "Bonds": 0.04, "Gold": 0.03, "Cash": 0.02, "Real estate": 0.09,
+            "description": "Stocks and property may benefit while gold may struggle.",
+            "warning": "BULL MARKET",
+        }
+    if event == "Market crash":
+        return {
+            "BHRD": -0.17, "BPOP": -0.10, "MDTA": -0.23, "Stocks overall": -0.17,
+            "Bonds": 0.02, "Gold": 0.13, "Cash": 0.03, "Real estate": -0.12,
+            "description": "Markets are falling sharply. Gold, bonds and cash may offer protection.",
+            "warning": "MARKET CRASH",
+        }
+    if event == "High inflation":
+        return {
+            "BHRD": -0.03, "BPOP": -0.02, "MDTA": -0.08, "Stocks overall": -0.03,
+            "Bonds": -0.06, "Gold": 0.17, "Cash": -0.02, "Real estate": 0.08,
+            "description": "Prices are rising quickly. Gold and property may perform better.",
+            "warning": "HIGH INFLATION",
+        }
+    if event == "Gold rally":
+        return {
+            "BHRD": 0.06, "BPOP": 0.05, "MDTA": 0.07, "Stocks overall": 0.06,
+            "Bonds": 0.04, "Gold": 0.20, "Cash": 0.02, "Real estate": 0.06,
+            "description": "Gold is rising in value. Other assets receive no special boost.",
+            "warning": "GOLD RALLY",
+        }
+    return {
+        "BHRD": 0.08, "BPOP": 0.05, "MDTA": 0.12, "Stocks overall": 0.08,
+        "Bonds": 0.04, "Gold": 0.05, "Cash": 0.02, "Real estate": 0.06,
+        "description": "No major event. Random gains and losses can still occur.",
+        "warning": "NO MAJOR EVENT",
+    }
+
+def make_year_market():
+    event = random.choices(MarketEvents, weights=EVENT_WEIGHTS, k=1)[0]
+    means = get_event_means(event)
+    adjustments = {
+        "BHRD": 0.03, "BPOP": 0.02, "MDTA": 0.05, "Stocks overall": 0.03,
+        "Bonds": 0.01, "Gold": 0.03, "Cash": 0.005, "Real estate": 0.02,
+    }
+    for asset, amount in adjustments.items():
+        means[asset] = adjust_expected_return(means[asset], amount)
+
+    volatilities = {
+        "BHRD": 0.22, "BPOP": 0.12, "MDTA": 0.35, "Stocks overall": 0.22,
+        "Bonds": 0.06, "Gold": 0.15, "Cash": 0.015, "Real estate": 0.12,
+    }
+    actual = {asset: generate_return(means[asset], volatilities[asset]) for asset in volatilities}
+    return event, means, actual
+
+def calculate_portfolio(value, allocation, stock_split, actual):
+    stock_value = value * allocation["Stocks"] / 100
+    result = {
+        "BHRD": stock_value * stock_split["BHRD"] / 100 * (1 + actual["BHRD"]),
+        "BPOP": stock_value * stock_split["BPOP"] / 100 * (1 + actual["BPOP"]),
+        "MDTA": stock_value * stock_split["MDTA"] / 100 * (1 + actual["MDTA"]),
+        "Bonds": value * allocation["Bonds"] / 100 * (1 + actual["Bonds"]),
+        "Gold": value * allocation["Gold"] / 100 * (1 + actual["Gold"]),
+        "Cash": value * allocation["Cash"] / 100 * (1 + actual["Cash"]),
+        "Real estate": value * allocation["Real estate"] / 100 * (1 + actual["Real estate"]),
+    }
+    result["Stocks"] = result["BHRD"] + result["BPOP"] + result["MDTA"]
+    result["Total"] = sum(result[k] for k in ("Stocks", "Bonds", "Gold", "Cash", "Real estate"))
+    return result
+
+def calculate_competitor(value, allocation, actual):
+    # Competitors use the same annual market returns as in Version 5.
+    return value * sum(
+        allocation[asset] / 100 * (1 + actual[return_key])
+        for asset, return_key in [
+            ("Stocks", "Stocks overall"), ("Bonds", "Bonds"), ("Gold", "Gold"),
+            ("Cash", "Cash"), ("Real estate", "Real estate")
+        ]
+    )
+
+# ------------------------------ GAME STATE ----------------------------------
+
+StartingPortfolio = random.randint(80000, 120000)
+MyPortfolio = StartingPortfolio
+GuardianPortfolio = 100000
+StrategistPortfolio = 100000
+MaverickPortfolio = 100000
+
+competitors = [
+    {"name": "THE GUARDIAN", "value": GuardianPortfolio,
+     "allocation": {"Stocks": 15, "Bonds": 35, "Gold": 20, "Real estate": 10, "Cash": 20},
+     "colour": PALE_GREEN, "style": "DEFENSIVE"},
+    {"name": "THE STRATEGIST", "value": StrategistPortfolio,
+     "allocation": {"Stocks": 40, "Bonds": 25, "Gold": 10, "Real estate": 15, "Cash": 10},
+     "colour": CYAN, "style": "BALANCED"},
+    {"name": "THE MAVERICK", "value": MaverickPortfolio,
+     "allocation": {"Stocks": 75, "Bonds": 5, "Gold": 5, "Real estate": 10, "Cash": 5},
+     "colour": PURPLE, "style": "AGGRESSIVE"},
+]
+
+allocation = {"Stocks": 35, "Bonds": 25, "Gold": 15, "Real estate": 10, "Cash": 15}
+stock_split = {"BHRD": 34, "BPOP": 33, "MDTA": 33}
+year = 1
+event, means, actual = make_year_market()
+year_started = MyPortfolio
+annual_gain = 0.0
+annual_return = 0.0
+total_gain = 0.0
+yearly_summary = []
+active_tab = "TRADING DESK"
+screen_mode = "allocation"  # allocation -> results -> final
+keep_allocation = False
+show_event_overlay = True
+event_overlay_started = pygame.time.get_ticks()
+toast = "Adjust your allocation, then advance the year."
+toast_until = pygame.time.get_ticks() + 4500
+dragging = None
+slider_rects = {}
+buttons = {}
+scroll_offset = 0
+
+# ------------------------------ DRAW HELPERS -------------------------------
+
+def draw_text(surface, text, x, y, colour=WHITE, font=FONT, anchor="topleft"):
+    image = font.render(str(text), True, colour)
+    rect = image.get_rect()
+    setattr(rect, anchor, (int(x), int(y)))
+    surface.blit(image, rect)
+    return rect
+
+def money(value):
+    return f"£{value:,.2f}"
+
+def pct(value):
+    return f"{value:+.2f}%"
+
+def panel(surface, rect, fill=PANEL, outline=BORDER, radius=8, width=1):
+    pygame.draw.rect(surface, fill, rect, border_radius=radius)
+    pygame.draw.rect(surface, outline, rect, width, border_radius=radius)
+
+def button(surface, key, rect, label, enabled=True, primary=False):
+    buttons[key] = pygame.Rect(rect)
+    fill = (56, 37, 20) if primary and enabled else (22, 31, 35)
+    outline = ORANGE if primary and enabled else BORDER
+    colour = AMBER if primary and enabled else (WHITE if enabled else MUTED)
+    pygame.draw.rect(surface, fill, rect, border_radius=5)
+    pygame.draw.rect(surface, outline, rect, 2 if primary else 1, border_radius=5)
+    draw_text(surface, label, rect[0] + rect[2] / 2, rect[1] + rect[3] / 2,
+              colour, FONT, "center")
+
+def draw_slider(surface, key, label, value, x, y, width, colour=ORANGE, suffix="%"):
+    draw_text(surface, label.upper(), x, y, MUTED, FONT_SMALL)
+    draw_text(surface, f"{int(round(value))}{suffix}", x + width, y, colour, FONT, "topright")
+    track = pygame.Rect(x, y + 24, width, 7)
+    pygame.draw.rect(surface, (43, 55, 59), track, border_radius=4)
+    fill_width = max(0, min(width, int(width * value / 100)))
+    if fill_width:
+        pygame.draw.rect(surface, colour, (track.x, track.y, fill_width, track.height), border_radius=4)
+    knob_x = track.x + fill_width
+    pygame.draw.circle(surface, BLACK, (knob_x, track.centery), 9)
+    pygame.draw.circle(surface, colour, (knob_x, track.centery), 6)
+    slider_rects[key] = pygame.Rect(track.x - 7, track.y - 12, track.width + 14, 31)
+
+def wrap_text(text, max_width, font):
+    words = text.split()
+    lines, line = [], ""
+    for word in words:
+        trial = word if not line else line + " " + word
+        if font.size(trial)[0] <= max_width:
+            line = trial
+        else:
+            if line:
+                lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
+
+def draw_wrapped(surface, text, x, y, width, colour=MUTED, font=FONT_SMALL, line_gap=4):
+    for line in wrap_text(text, width, font):
+        draw_text(surface, line, x, y, colour, font)
+        y += font.get_height() + line_gap
+    return y
+
+# ------------------------------ PIXEL ART -----------------------------------
+
+def pixel_rect(surface, colour, x, y, w, h):
+    pygame.draw.rect(surface, colour, (int(x), int(y), int(w), int(h)))
+
+def draw_pixel_scene(surface, rect, now):
+    x, y, w, h = rect
+    scene = pygame.Surface((w, h))
+    scene.fill(PIXEL_BG)
+
+    # Distant city / window
+    for i in range(12):
+        bx = int(i * w / 12)
+        bh = int(h * (0.18 + (i * 17 % 29) / 100))
+        pixel_rect(scene, (13, 30, 39), bx, int(h * .25) - bh, max(12, w // 15), bh + int(h * .25))
+        for wy in range(int(h * .11), int(h * .32), 16):
+            if (i * 3 + wy) % 4:
+                pixel_rect(scene, (30, 68, 76), bx + 7, wy, 4, 5)
+
+    # Wall / window frame
+    pygame.draw.rect(scene, (26, 43, 49), (int(w*.06), int(h*.08), int(w*.88), int(h*.42)), 5)
+    pygame.draw.line(scene, (26, 43, 49), (int(w*.50), int(h*.08)), (int(w*.50), int(h*.50)), 5)
+    pygame.draw.line(scene, (26, 43, 49), (int(w*.06), int(h*.30)), (int(w*.94), int(h*.30)), 4)
+
+    # Market event glow
+    event_colour = RED if event == "Market crash" else GREEN if event == "Bull market" else AMBER if event == "Gold rally" else CYAN
+    glow = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(glow, (*event_colour, 17), (0, 0, w, h))
+    scene.blit(glow, (0, 0))
+
+    # Desk and clutter
+    desk_y = int(h * .69)
+    pixel_rect(scene, (67, 48, 39), int(w*.04), desk_y, int(w*.92), int(h*.10))
+    pixel_rect(scene, (112, 77, 48), int(w*.04), desk_y, int(w*.92), 7)
+    pixel_rect(scene, (39, 32, 31), int(w*.12), desk_y + int(h*.10), int(w*.75), int(h*.16))
+    # Papers
+    for i in range(4):
+        px = int(w*(.10 + i*.12))
+        py = desk_y - 10 + (i % 2) * 5 + int(math.sin(now/350+i)*2)
+        pixel_rect(scene, (185, 176, 139), px, py, 37, 25)
+        for line in range(3):
+            pixel_rect(scene, (108, 124, 111), px+5, py+5+line*5, 25, 2)
+
+    # Monitor stands and CRTs
+    monitor_specs = [
+        (int(w*.10), int(h*.32), int(w*.28), int(h*.25), CYAN),
+        (int(w*.42), int(h*.25), int(w*.27), int(h*.30), ORANGE),
+        (int(w*.72), int(h*.34), int(w*.19), int(h*.22), GREEN),
+    ]
+    for idx, (mx, my, mw, mh, tint) in enumerate(monitor_specs):
+        pixel_rect(scene, (4, 7, 9), mx-5, my-5, mw+10, mh+10)
+        pixel_rect(scene, (69, 81, 78), mx-2, my-2, mw+4, mh+4)
+        pixel_rect(scene, (8, 17, 21), mx, my, mw, mh)
+        pixel_rect(scene, (17, 39, 42), mx+5, my+5, mw-10, mh-10)
+        # Monitor tickers / chart lines
+        draw_text(scene, ["MKT / LIVE", "F&F TERMINAL", "ASSET MIX"][idx],
+                  mx+9, my+7, tint, FONT_TINY)
+        for line in range(3):
+            text = f"{['BHRD','BPOP','MDTA'][line]} {random.Random(line+idx).randint(10,99)}.{(now//500+line*7)%10}"
+            draw_text(scene, text, mx+8, my+23+line*14, PALE_GREEN if line != 1 else tint, FONT_TINY)
+        chart_y = my + int(mh*.73)
+        points = []
+        for p in range(9):
+            px = mx + 7 + p * (mw-14) / 8
+            py = chart_y + math.sin((p + now/550 + idx) * 1.3) * 8 + math.cos(p*0.7+idx)*4
+            points.append((int(px), int(py)))
+        if len(points) > 1:
+            pygame.draw.lines(scene, tint, False, points, 2)
+        if (now // 450) % 2:
+            pixel_rect(scene, tint, mx+mw-16, my+8, 5, 7)
+        # CRT stand
+        pixel_rect(scene, (71, 74, 67), mx+mw//2-7, my+mh+5, 14, 15)
+        pixel_rect(scene, (83, 73, 56), mx+mw//2-22, my+mh+18, 44, 5)
+
+    # Trader body / chair
+    pixel_rect(scene, (29, 40, 48), int(w*.38), int(h*.53), int(w*.24), int(h*.24))
+    pixel_rect(scene, (12, 17, 22), int(w*.34), int(h*.51), int(w*.32), int(h*.22))
+    # Hair and face
+    face_x, face_y = int(w*.46), int(h*.48)
+    pixel_rect(scene, (176, 119, 78), face_x, face_y, int(w*.09), int(h*.12))
+    pixel_rect(scene, (72, 45, 35), face_x-2, face_y-7, int(w*.10), 12)
+    pixel_rect(scene, (72, 45, 35), face_x-5, face_y+1, 8, 18)
+    # Eyes / expression
+    panic = event == "Market crash"
+    eye_colour = RED if panic else (20, 23, 23)
+    pixel_rect(scene, eye_colour, face_x+8, face_y+12, 4, 4)
+    pixel_rect(scene, eye_colour, face_x+22, face_y+12, 4, 4)
+    if panic:
+        pixel_rect(scene, (44, 25, 24), face_x+11, face_y+27, 12, 5)
+    elif event == "Bull market":
+        pixel_rect(scene, (52, 34, 28), face_x+10, face_y+26, 15, 3)
+        pixel_rect(scene, GREEN, face_x+12, face_y+24, 10, 2)
+    else:
+        pixel_rect(scene, (52, 34, 28), face_x+12, face_y+27, 10, 2)
+    # Arms on desk
+    pixel_rect(scene, (176, 119, 78), int(w*.39), int(h*.62), int(w*.12), 11)
+    pixel_rect(scene, (176, 119, 78), int(w*.53), int(h*.62), int(w*.12), 11)
+    pixel_rect(scene, (39, 54, 61), int(w*.41), int(h*.60), int(w*.18), 16)
+    # Coffee cup and animated steam
+    cup_x, cup_y = int(w*.78), desk_y-21
+    pixel_rect(scene, (198, 197, 173), cup_x, cup_y, 19, 18)
+    pygame.draw.rect(scene, (198, 197, 173), (cup_x+16, cup_y+4, 8, 8), 3)
+    for i in range(3):
+        sx = cup_x + 5 + i*5
+        sy = cup_y - 5 - int((now/80+i*5) % 13)
+        pygame.draw.rect(scene, (113, 154, 153), (sx, sy, 2, 5))
+
+    # CRT scanlines
+    overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+    for sy in range(0, h, 4):
+        pygame.draw.line(overlay, (0, 0, 0, 38), (0, sy), (w, sy))
+    scene.blit(overlay, (0, 0))
+    surface.blit(scene, (x, y))
+    pygame.draw.rect(surface, BORDER, rect, 1)
+
+    # Small scene caption
+    draw_text(surface, "NIGHT SHIFT // LONDON MARKETS", x+18, y+16, AMBER, FONT_SMALL)
+    draw_text(surface, "LIVE FEED  ●  " + event.upper(), x+18, y+37, event_colour, FONT_TINY)
+
+# ------------------------------ UI SECTIONS ---------------------------------
+
+def draw_header(surface, left_w, right_x, right_w, h):
+    draw_text(surface, "FORTUNE", right_x+24, 18, ORANGE, FONT_BIG)
+    draw_text(surface, "& FALLOUT", right_x+24, 48, WHITE, FONT_MED)
+    draw_text(surface, "PORTFOLIO RISK SIMULATION  /  VERSION 05", right_x+24, 78, MUTED, FONT_TINY)
+    panel(surface, (right_x+right_w-184, 22, 160, 52), PANEL_2, ORANGE, 5)
+    draw_text(surface, f"YEAR {min(year, YEARS):02d} / {YEARS}", right_x+right_w-104, 39, AMBER, FONT_MED, "center")
+    draw_text(surface, "SIMULATION ACTIVE" if screen_mode != "final" else "SIMULATION COMPLETE",
+              right_x+right_w-104, 59, GREEN if screen_mode != "final" else CYAN, FONT_TINY, "center")
+    pygame.draw.line(surface, ORANGE, (right_x+24, 103), (right_x+right_w-24, 103), 2)
+
+def draw_tabs(surface, right_x, right_w):
+    labels = ["TRADING DESK", "EXPECTED RETURNS", "COMPETITORS"]
+    tab_y = 118
+    tab_w = (right_w - 48) // 3
+    for i, label in enumerate(labels):
+        rect = pygame.Rect(right_x+24+i*tab_w, tab_y, tab_w-5, 34)
+        buttons["tab_"+label] = rect
+        selected = active_tab == label
+        pygame.draw.rect(surface, (48, 33, 21) if selected else PANEL_2, rect, border_radius=4)
+        pygame.draw.rect(surface, ORANGE if selected else BORDER, rect, 1, border_radius=4)
+        draw_text(surface, label, rect.centerx, rect.centery, AMBER if selected else MUTED, FONT_TINY, "center")
+
+def draw_metric_card(surface, rect, label, value, sub, value_colour=AMBER):
+    rect = pygame.Rect(rect)
+    panel(surface, rect, PANEL_2, BORDER, 6)
+    draw_text(surface, label.upper(), rect.x+12, rect.y+10, MUTED, FONT_TINY)
+    draw_text(surface, value, rect.x+12, rect.y+31, value_colour, FONT_MED)
+    draw_text(surface, sub, rect.x+12, rect.y+57, MUTED, FONT_TINY)
+
+def draw_allocation_tab(surface, rect):
+    x, y, w, h = rect
+    draw_text(surface, "PORTFOLIO ALLOCATION", x, y, AMBER, FONT_MED)
+    draw_text(surface, "Drag a slider to rebalance. Cash is the residual.", x, y+27, MUTED, FONT_SMALL)
+
+    labels = ["Stocks", "Bonds", "Gold", "Real estate"]
+    colours = [ORANGE, CYAN, AMBER, PURPLE]
+    slider_x = x
+    slider_w = min(340, w-30)
+    slider_y = y+68
+    for i, label in enumerate(labels):
+        draw_slider(surface, "alloc_"+label, label, allocation[label], slider_x, slider_y+i*54, slider_w, colours[i])
+
+    cash = 100 - sum(allocation[k] for k in labels)
+    cash_colour = RED if cash > 50 else PALE_GREEN
+    panel(surface, (x, slider_y+4*54-1, slider_w, 46), PANEL_2, RED if cash > 50 else BORDER, 5)
+    draw_text(surface, "CASH / AUTO-ALLOCATED", x+12, slider_y+4*54+8, MUTED, FONT_TINY)
+    draw_text(surface, f"{cash}%", x+slider_w-12, slider_y+4*54+10, cash_colour, FONT_MED, "topright")
+    if cash > 50:
+        draw_text(surface, "WARNING: MORE THAN HALF YOUR PORTFOLIO IS CASH", x, slider_y+4*54+52, RED, FONT_TINY)
+
+    # Stock sub-allocation
+    sub_y = slider_y + 4*54 + 75
+    draw_text(surface, "STOCK BREAKDOWN", x, sub_y, AMBER, FONT_MED)
+    if allocation["Stocks"] <= 0:
+        draw_text(surface, "Set Stocks above 0% to edit the stock split.", x, sub_y+27, MUTED, FONT_SMALL)
+    else:
+        draw_text(surface, "BHRD + BPOP + MDTA always total 100% of stocks.", x, sub_y+25, MUTED, FONT_TINY)
+        for i, ticker in enumerate(("BHRD", "BPOP", "MDTA")):
+            draw_slider(surface, "stock_"+ticker, ticker, stock_split[ticker], x, sub_y+47+i*45, slider_w, [CYAN, GREEN, PURPLE][i])
+
+    # Bottom action buttons are positioned by the main layout function.
+    draw_text(surface, f"STARTING CAPITAL  {money(StartingPortfolio)}", x, y+h-37, MUTED, FONT_TINY)
+
+def draw_expected_tab(surface, rect):
+    x, y, w, h = rect
+    draw_text(surface, "EXPECTED RETURNS // YEARLY ASSUMPTIONS", x, y, AMBER, FONT_MED)
+    draw_wrapped(surface, "These are the adjusted expected average returns for this year's market event. Actual results are randomly generated and are not guaranteed.", x, y+30, w-10, MUTED, FONT_SMALL)
+    rows = [
+        ("BHRD", "BHRD", CYAN), ("BPOP", "BPOP", GREEN), ("MDTA", "MDTA", PURPLE),
+        ("Stocks overall", "Stocks overall", ORANGE), ("Bonds", "Bonds", PALE_GREEN),
+        ("Gold", "Gold", AMBER), ("Cash", "Cash", CYAN), ("Real estate", "Real estate", PURPLE)
+    ]
+    table_y = y+96
+    panel(surface, (x, table_y, w, 38), PANEL_2, BORDER, 4)
+    draw_text(surface, "ASSET", x+14, table_y+11, MUTED, FONT_SMALL)
+    draw_text(surface, "EXPECTED RETURN", x+w-14, table_y+11, MUTED, FONT_SMALL, "topright")
+    for i, (label, key, colour) in enumerate(rows):
+        ry = table_y+43+i*42
+        if i % 2 == 0:
+            pygame.draw.rect(surface, (16, 23, 27), (x, ry-4, w, 36), border_radius=3)
+        draw_text(surface, label, x+14, ry+5, WHITE, FONT)
+        val = means[key] * 100
+        draw_text(surface, f"{val:+.2f}%", x+w-14, ry+4, GREEN if val >= 0 else RED, FONT_MED, "topright")
+        pygame.draw.line(surface, BORDER, (x+10, ry+34), (x+w-10, ry+34), 1)
+    draw_text(surface, f"MARKET EVENT: {event.upper()}", x, table_y+43+len(rows)*42+10, ORANGE, FONT_SMALL)
+
+def draw_competitors_tab(surface, rect):
+    x, y, w, h = rect
+    draw_text(surface, "RIVAL INVESTOR NETWORK", x, y, CYAN, FONT_MED)
+    draw_text(surface, "Shared market conditions. Different strategic allocations.", x, y+28, MUTED, FONT_SMALL)
+    values = [("YOU", MyPortfolio, allocation, ORANGE, "YOUR STRATEGY")]
+    values += [(c["name"], c["value"], c["allocation"], c["colour"], c["style"]) for c in competitors]
+    values.sort(key=lambda item: item[1], reverse=True)
+    for i, (name, value, alloc, colour, style) in enumerate(values):
+        cy = y+70+i*116
+        card = pygame.Rect(x, cy, w, 100)
+        panel(surface, card, (19, 25, 34) if i % 2 == 0 else (17, 31, 34), colour, 7, 2)
+        draw_text(surface, f"#{i+1}  {name}", x+14, cy+12, colour, FONT_MED)
+        draw_text(surface, money(value), x+w-14, cy+12, WHITE, FONT_MED, "topright")
+        draw_text(surface, style, x+14, cy+42, MUTED, FONT_TINY)
+        summary = f"STK {alloc['Stocks']}%   BND {alloc['Bonds']}%   GLD {alloc['Gold']}%   RE {alloc['Real estate']}%   CASH {alloc['Cash']}%"
+        draw_text(surface, summary, x+14, cy+64, PALE_GREEN, FONT_TINY)
+
+def draw_results_tab(surface, rect):
+    x, y, w, h = rect
+    draw_text(surface, f"YEAR {year} PERFORMANCE REPORT", x, y, AMBER, FONT_MED)
+    draw_text(surface, "Your portfolio has been marked to market.", x, y+28, MUTED, FONT_SMALL)
+    cards_y = y+64
+    gap = 10
+    cw = (w-gap*2)//3
+    draw_metric_card(surface, (x, cards_y, cw, 83), "Portfolio value", money(MyPortfolio), "End of year")
+    draw_metric_card(surface, (x+cw+gap, cards_y, cw, 83), "Annual gain / loss", money(annual_gain), "This year", GREEN if annual_gain >= 0 else RED)
+    draw_metric_card(surface, (x+2*(cw+gap), cards_y, cw, 83), "Annual return", pct(annual_return), "This year", GREEN if annual_return >= 0 else RED)
+
+    draw_text(surface, "ASSET VALUES AFTER RETURNS", x, cards_y+104, AMBER, FONT_SMALL)
+    # Last portfolio breakdown is stored in last_result_breakdown.
+    rows = [
+        ("Stocks", last_result_breakdown.get("Stocks", 0), ORANGE),
+        ("Bonds", last_result_breakdown.get("Bonds", 0), CYAN),
+        ("Gold", last_result_breakdown.get("Gold", 0), AMBER),
+        ("Cash", last_result_breakdown.get("Cash", 0), PALE_GREEN),
+        ("Real estate", last_result_breakdown.get("Real estate", 0), PURPLE),
+    ]
+    max_val = max([v for _, v, _ in rows] + [1])
+    for i, (label, value, colour) in enumerate(rows):
+        ry = cards_y+133+i*42
+        draw_text(surface, label, x, ry, WHITE, FONT_SMALL)
+        bar = pygame.Rect(x+115, ry+2, max(40, w-260), 12)
+        pygame.draw.rect(surface, (38, 49, 53), bar, border_radius=3)
+        pygame.draw.rect(surface, colour, (bar.x, bar.y, int(bar.width*value/max_val), bar.height), border_radius=3)
+        draw_text(surface, money(value), x+w, ry-2, colour, FONT_SMALL, "topright")
+
+def draw_final(surface, rect):
+    x, y, w, h = rect
+    draw_text(surface, "SIMULATION COMPLETE", x, y, AMBER, FONT_BIG)
+    draw_text(surface, "TEN YEARS IN THE MARKET. HERE IS YOUR RESULT.", x, y+38, MUTED, FONT_TINY)
+
+    total_return = ((MyPortfolio/StartingPortfolio)-1)*100
+    gap = 8
+    cw = (w-gap*2)//3
+    draw_metric_card(surface, (x, y+60, cw, 68), "Final portfolio", money(MyPortfolio), "Starting: "+money(StartingPortfolio))
+    draw_metric_card(surface, (x+cw+gap, y+60, cw, 68), "Total gain / loss", money(MyPortfolio-StartingPortfolio), "Lifetime result", GREEN if MyPortfolio >= StartingPortfolio else RED)
+    draw_metric_card(surface, (x+2*(cw+gap), y+60, cw, 68), "Total return", pct(total_return), "10-year return", GREEN if total_return >= 0 else RED)
+
+    draw_text(surface, "FINAL LEADERBOARD", x, y+142, ORANGE, FONT_MED)
+    leaderboard = [("YOU", MyPortfolio, StartingPortfolio, ORANGE)]
+    leaderboard += [(c["name"], c["value"], 100000, c["colour"]) for c in competitors]
+    leaderboard.sort(key=lambda item: item[1], reverse=True)
+    table_y = y+172
+    for i, (name, value, initial, colour) in enumerate(leaderboard):
+        ry = table_y+i*27
+        pygame.draw.rect(surface, PANEL_2 if i % 2 == 0 else PANEL, (x, ry, w, 24), border_radius=3)
+        draw_text(surface, f"{i+1}.  {name}", x+9, ry+5, colour, FONT_TINY)
+        draw_text(surface, money(value), x+w-135, ry+4, WHITE, FONT_TINY, "topright")
+        draw_text(surface, f"{((value/initial)-1)*100:+.2f}%", x+w-8, ry+4, GREEN if value >= initial else RED, FONT_TINY, "topright")
+
+    summary_y = y+292
+    draw_text(surface, "YEARLY SUMMARY", x, summary_y, ORANGE, FONT_MED)
+    cols = [("YR", 0.02), ("EVENT", .12), ("START VALUE", .38), ("GAIN / LOSS", .62), ("RETURN", .84)]
+    header_y = summary_y+28
+    for label, pos in cols:
+        draw_text(surface, label, x+int(w*pos), header_y, MUTED, FONT_TINY)
+    for i, row in enumerate(yearly_summary[-10:]):
+        ry = header_y+20+i*19
+        if ry > y+h-5:
+            break
+        if i % 2 == 0:
+            pygame.draw.rect(surface, (15, 22, 26), (x, ry-2, w, 18), border_radius=2)
+        draw_text(surface, row[0], x+int(w*.02), ry, WHITE, FONT_TINY)
+        draw_text(surface, row[1][:14], x+int(w*.12), ry, AMBER, FONT_TINY)
+        draw_text(surface, f"£{row[2]:,.0f}", x+int(w*.38), ry, WHITE, FONT_TINY)
+        draw_text(surface, f"£{row[3]:+,.0f}", x+int(w*.62), ry, GREEN if row[3] >= 0 else RED, FONT_TINY)
+        draw_text(surface, f"{row[4]:+.2f}%", x+int(w*.84), ry, GREEN if row[4] >= 0 else RED, FONT_TINY)
+
+# ------------------------------ MAIN DRAW -----------------------------------
+
+last_result_breakdown = {"Stocks": 0, "Bonds": 0, "Gold": 0, "Cash": 0, "Real estate": 0}
+
+def draw_event_overlay(surface, rect, now):
+    if not show_event_overlay or screen_mode == "final":
+        return
+    x, y, w, h = rect
+    alpha = max(0, min(190, 190 - int((now-event_overlay_started)/7)))
+    overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, alpha))
+    surface.blit(overlay, (x, y))
+    colour = RED if event == "Market crash" else GREEN if event == "Bull market" else AMBER if event == "Gold rally" else CYAN
+    box_w = min(520, w-40)
+    box_h = 180
+    box = pygame.Rect(x+(w-box_w)//2, y+(h-box_h)//2, box_w, box_h)
+    panel(surface, box, (12, 18, 22), colour, 8, 2)
+    draw_text(surface, "MARKET EVENT DETECTED", box.centerx, box.y+24, MUTED, FONT_TINY, "midtop")
+    draw_text(surface, event.upper(), box.centerx, box.y+50, colour, FONT_BIG, "midtop")
+    draw_wrapped(surface, means["description"], box.x+20, box.y+94, box.width-40, WHITE, FONT_SMALL, 4)
+    draw_text(surface, "CLICK ANYWHERE TO DISMISS", box.centerx, box.bottom-22, MUTED, FONT_TINY, "midbottom")
+
+def draw(now):
+    global slider_rects, buttons
+    slider_rects = {}
+    buttons = {}
+    width, height = screen.get_size()
+    screen.fill(BLACK)
+    left_w = width // 2
+    right_x = left_w
+    right_w = width-left_w
+
+    # Always-visible pixel-art half
+    draw_pixel_scene(screen, (0, 0, left_w, height), now)
+    draw_text(screen, "FORTUNE & FALLOUT", 24, height-72, WHITE, FONT_BIG)
+    draw_text(screen, "A PYTHON PORTFOLIO RISK SIMULATION", 26, height-37, AMBER, FONT_SMALL)
+    draw_text(screen, f"PORTFOLIO  {money(MyPortfolio)}", 24, height-105, PALE_GREEN, FONT_MED)
+
+    # Terminal half
+    pygame.draw.rect(screen, BLACK, (right_x, 0, right_w, height))
+    pygame.draw.line(screen, BORDER, (right_x, 0), (right_x, height), 2)
+    draw_header(screen, left_w, right_x, right_w, height)
+
+    content_x = right_x+24
+    content_w = right_w-48
+    metrics_y = 166
+    gap = 8
+    card_w = (content_w-gap*2)//3
+    draw_metric_card(screen, (content_x, metrics_y, card_w, 76), "Portfolio value", money(MyPortfolio), "Current balance")
+    draw_metric_card(screen, (content_x+card_w+gap, metrics_y, card_w, 76), "Annual gain / loss", money(annual_gain), "Last completed year", GREEN if annual_gain >= 0 else RED)
+    draw_metric_card(screen, (content_x+2*(card_w+gap), metrics_y, card_w, 76), "Annual return", pct(annual_return), "Last completed year", GREEN if annual_return >= 0 else RED)
+
+    draw_tabs(screen, right_x, right_w)
+    content_y = 170 + 76 + 54
+    bottom_controls_y = height-62
+    content_h = bottom_controls_y-content_y-10
+    content_rect = pygame.Rect(content_x, content_y, content_w, content_h)
+
+    if screen_mode == "final":
+        draw_final(screen, content_rect)
+        button(screen, "restart", (right_x+right_w-190, height-52, 166, 34), "RUN NEW SIMULATION", True, True)
+    elif screen_mode == "results":
+        draw_results_tab(screen, content_rect)
+        button(screen, "next_year", (right_x+right_w-235, height-52, 210, 34),
+               "FINISH / VIEW LEADERBOARD" if year >= YEARS else "CONTINUE TO NEXT YEAR", True, True)
+        button(screen, "results_competitors", (right_x+24, height-52, 160, 34), "VIEW COMPETITORS")
+    else:
+        if active_tab == "TRADING DESK":
+            draw_allocation_tab(screen, content_rect)
+        elif active_tab == "EXPECTED RETURNS":
+            draw_expected_tab(screen, content_rect)
+        else:
+            draw_competitors_tab(screen, content_rect)
+
+        if year > 1:
+            button(screen, "keep", (right_x+24, height-52, 180, 34),
+                   "KEEP LAST ALLOCATION" if not keep_allocation else "KEEPING ALLOCATION", True, False)
+        button(screen, "advance", (right_x+right_w-238, height-52, 214, 34),
+               "CONFIRM / ADVANCE YEAR", True, True)
+
+    if toast and pygame.time.get_ticks() < toast_until:
+        toast_w = min(right_w-40, max(320, FONT_SMALL.size(toast)[0]+28))
+        toast_rect = pygame.Rect(right_x+(right_w-toast_w)//2, height-105, toast_w, 30)
+        panel(screen, toast_rect, PANEL_2, ORANGE, 4)
+        draw_text(screen, toast, toast_rect.centerx, toast_rect.centery, AMBER, FONT_SMALL, "center")
+
+    # Event overlay sits above the scene and is intentionally dramatic.
+    draw_event_overlay(screen, (0, 0, left_w, height), now)
+
+    # Tiny footer on terminal side
+    draw_text(screen, "F&F / SIMULATED RETURNS / NOT FINANCIAL ADVICE", right_x+24, height-18, MUTED, FONT_TINY)
+
+def set_toast(message, duration=3000):
+    global toast, toast_until
+    toast = message
+    toast_until = pygame.time.get_ticks() + duration
+
+def rebalance_stock_split(changed_key, new_value):
+    # Keep all three stock percentages summing to exactly 100.
+    other_keys = [key for key in ("BHRD", "BPOP", "MDTA") if key != changed_key]
+    remaining = 100 - new_value
+    old_total = sum(stock_split[k] for k in other_keys)
+    if old_total <= 0:
+        stock_split[other_keys[0]] = remaining
+        stock_split[other_keys[1]] = 0
+    else:
+        first = round(remaining * stock_split[other_keys[0]] / old_total)
+        first = max(0, min(remaining, first))
+        stock_split[other_keys[0]] = first
+        stock_split[other_keys[1]] = remaining-first
+    stock_split[changed_key] = new_value
+
+def handle_slider(key, mouse_x):
+    if key.startswith("alloc_"):
+        asset = key[6:]
+        other_assets = [a for a in ("Stocks", "Bonds", "Gold", "Real estate") if a != asset]
+        rect = slider_rects[key]
+        new_value = round(max(0, min(100, (mouse_x-rect.x-7) / max(1, rect.width-14) * 100)))
+        available = 100 - sum(allocation[a] for a in other_assets)
+        new_value = max(0, min(new_value, available))
+        allocation[asset] = new_value
+        allocation["Cash"] = 100 - sum(allocation[a] for a in ("Stocks", "Bonds", "Gold", "Real estate"))
+    elif key.startswith("stock_"):
+        ticker = key[6:]
+        rect = slider_rects[key]
+        new_value = round(max(0, min(100, (mouse_x-rect.x-7) / max(1, rect.width-14) * 100)))
+        rebalance_stock_split(ticker, new_value)
+
+def begin_next_year():
+    global event, means, actual, year_started, show_event_overlay, event_overlay_started
+    event, means, actual = make_year_market()
+    year_started = MyPortfolio
+    show_event_overlay = True
+    event_overlay_started = pygame.time.get_ticks()
+
+def advance_year():
+    global MyPortfolio, annual_gain, annual_return, total_gain, screen_mode
+    global GuardianPortfolio, StrategistPortfolio, MaverickPortfolio, last_result_breakdown
+    global year, keep_allocation
+
+    if sum(allocation[k] for k in ("Stocks", "Bonds", "Gold", "Real estate")) > 100:
+        set_toast("Allocation exceeds 100%. Adjust your sliders.")
+        return
+
+    # The player's stock split remains 100% of the stock allocation.
+    result = calculate_portfolio(MyPortfolio, allocation, stock_split, actual)
+    last_result_breakdown = result
+    old_value = MyPortfolio
+    MyPortfolio = result["Total"]
+    annual_gain = MyPortfolio-old_value
+    annual_return = (annual_gain/old_value)*100 if old_value else 0
+    total_gain = MyPortfolio-StartingPortfolio
+
+    # Competitors compound their portfolios with the same annual asset returns.
+    for rival in competitors:
+        rival["value"] = calculate_competitor(rival["value"], rival["allocation"], actual)
+    GuardianPortfolio = competitors[0]["value"]
+    StrategistPortfolio = competitors[1]["value"]
+    MaverickPortfolio = competitors[2]["value"]
+
+    yearly_summary.append([year, event, old_value, annual_gain, annual_return, MyPortfolio])
+    screen_mode = "results"
+    keep_allocation = False
+    set_toast(f"Year {year} complete. Results are ready.", 3500)
+
+def restart_game():
+    global StartingPortfolio, MyPortfolio, GuardianPortfolio, StrategistPortfolio, MaverickPortfolio
+    global competitors, allocation, stock_split, year, event, means, actual, year_started
+    global annual_gain, annual_return, total_gain, yearly_summary, active_tab, screen_mode
+    global keep_allocation, show_event_overlay, event_overlay_started, last_result_breakdown
+    StartingPortfolio = random.randint(80000, 120000)
+    MyPortfolio = StartingPortfolio
+    GuardianPortfolio = StrategistPortfolio = MaverickPortfolio = 100000
+    competitors = [
+        {"name": "THE GUARDIAN", "value": 100000,
+         "allocation": {"Stocks": 15, "Bonds": 35, "Gold": 20, "Real estate": 10, "Cash": 20},
+         "colour": PALE_GREEN, "style": "DEFENSIVE"},
+        {"name": "THE STRATEGIST", "value": 100000,
+         "allocation": {"Stocks": 40, "Bonds": 25, "Gold": 10, "Real estate": 15, "Cash": 10},
+         "colour": CYAN, "style": "BALANCED"},
+        {"name": "THE MAVERICK", "value": 100000,
+         "allocation": {"Stocks": 75, "Bonds": 5, "Gold": 5, "Real estate": 10, "Cash": 5},
+         "colour": PURPLE, "style": "AGGRESSIVE"},
+    ]
+    allocation = {"Stocks": 35, "Bonds": 25, "Gold": 15, "Real estate": 10, "Cash": 15}
+    stock_split = {"BHRD": 34, "BPOP": 33, "MDTA": 33}
+    year = 1
+    event, means, actual = make_year_market()
+    year_started = MyPortfolio
+    annual_gain = annual_return = total_gain = 0.0
+    yearly_summary = []
+    active_tab = "TRADING DESK"
+    screen_mode = "allocation"
+    keep_allocation = False
+    show_event_overlay = True
+    event_overlay_started = pygame.time.get_ticks()
+    last_result_breakdown = {"Stocks": 0, "Bonds": 0, "Gold": 0, "Cash": 0, "Real estate": 0}
+    set_toast("New simulation started.", 3000)
+
+# ------------------------------ EVENT LOOP ----------------------------------
+
+running = True
+while running:
+    now = pygame.time.get_ticks()
+    width, height = screen.get_size()
+    left_w = width // 2
+    right_x = left_w
+
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            running = False
+
+        elif e.type == pygame.VIDEORESIZE:
+            new_w = max(MIN_WIDTH, e.w)
+            new_h = max(MIN_HEIGHT, e.h)
+            screen = pygame.display.set_mode((new_w, new_h), pygame.RESIZABLE)
+
+        elif e.type == pygame.KEYDOWN:
+            if e.key == pygame.K_ESCAPE:
+                running = False
+            elif e.key == pygame.K_RETURN and screen_mode == "allocation":
+                show_event_overlay = False
+                advance_year()
+
+        elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+            pos = e.pos
+            if show_event_overlay and screen_mode != "final":
+                show_event_overlay = False
+                continue
+
+            clicked_slider = False
+            if screen_mode == "allocation":
+                for key, rect in slider_rects.items():
+                    if rect.collidepoint(pos) and active_tab == "TRADING DESK":
+                        if keep_allocation:
+                            set_toast("Turn off 'keep allocation' to edit your sliders.")
+                        else:
+                            dragging = key
+                            handle_slider(key, pos[0])
+                        clicked_slider = True
+                        break
+                if clicked_slider:
+                    continue
+
+            clicked_button = next((key for key, rect in buttons.items() if rect.collidepoint(pos)), None)
+            if clicked_button:
+                if clicked_button.startswith("tab_"):
+                    active_tab = clicked_button[4:]
+                elif clicked_button == "advance":
+                    show_event_overlay = False
+                    advance_year()
+                elif clicked_button == "keep":
+                    keep_allocation = not keep_allocation
+                    set_toast("Previous allocation will be kept." if keep_allocation else "Allocation editing enabled.")
+                elif clicked_button == "next_year":
+                    if year >= YEARS:
+                        screen_mode = "final"
+                    else:
+                        year += 1
+                        if not keep_allocation:
+                            # Keep current values as defaults; the player may edit them.
+                            pass
+                        begin_next_year()
+                        screen_mode = "allocation"
+                        active_tab = "TRADING DESK"
+                elif clicked_button == "results_competitors":
+                    active_tab = "COMPETITORS"
+                    screen_mode = "allocation"
+                elif clicked_button == "restart":
+                    restart_game()
+
+        elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+            dragging = None
+
+        elif e.type == pygame.MOUSEMOTION and dragging and screen_mode == "allocation" and active_tab == "TRADING DESK":
+            if dragging in slider_rects and not keep_allocation:
+                handle_slider(dragging, e.pos[0])
+
+    # Keep minimum allocation values in bounds and cash residual live.
+    allocation["Cash"] = max(0, 100-sum(allocation[k] for k in ("Stocks", "Bonds", "Gold", "Real estate")))
+
+    draw(now)
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
