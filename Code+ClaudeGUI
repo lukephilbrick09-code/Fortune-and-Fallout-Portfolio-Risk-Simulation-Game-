@@ -1,0 +1,708 @@
+#version7 - Fortune & Fallout: Market Intelligence & Interactive Trading upgrade
+# Sections marked "NEW" are additions; everything else is the version-6 game with small edits.
+import random, math, sys
+import pygame
+
+# ------------------------------------------------------------------ setup
+W, H, HALF, YEARS = 1600, 900, 800, 10
+PW, PH = 200, 225  # pixel scene resolution (scaled 4x)
+pygame.init()
+screen = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)  # SCALED keeps the layout correct at any window size
+pygame.display.set_caption("Fortune & Fallout - Portfolio Terminal")
+clock = pygame.time.Clock()
+MONO = "consolas,menlo,dejavusansmono,couriernew,monospace"
+def F(size, bold=False): return pygame.font.SysFont(MONO, size, bold=bold)
+f_s, f_m, f_mb, f_l, f_xl, f_pop = F(15), F(18), F(18, True), F(22, True), F(44, True), F(56, True)
+pxfont = pygame.font.SysFont(MONO, 8)
+NEON = "trebuchetms,verdana,arial"
+n_s, n_m, n_l, n_xl = (pygame.font.SysFont(NEON, 15, True), pygame.font.SysFont(NEON, 24, True),
+                       pygame.font.SysFont(NEON, 36, True), pygame.font.SysFont(NEON, 56, True))
+
+BG, PANEL, AMBER, LINE = (5, 5, 6), (14, 12, 10), (255, 152, 0), (80, 52, 12)
+PGREEN, CYAN, RED, UP = (150, 230, 160), (0, 200, 230), (255, 70, 70), (90, 255, 140)
+
+# ------------------------------------------------------------------ game data (original)
+NAMES = ["BHRD", "BPOP", "MDTA", "Stocks overall", "Bonds", "Gold", "Cash", "Real estate"]
+CODES = ["BHRD", "BPOP", "MDTA", "STCK", "BOND", "GOLD", "CASH", "REAL"]
+STOCKS = ["BHRD", "BPOP", "MDTA"]
+ADJ = (0.03, 0.02, 0.05, 0.03, 0.01, 0.03, 0.005, 0.02)
+VOL = (0.22, 0.12, 0.35, 0.22, 0.06, 0.15, 0.015, 0.12)
+EV_KEYS = ["Bull market", "Market crash", "High inflation", "Gold rally", "No event"]
+EV = {
+ "Bull market": dict(title="BULL MARKET", warn="WARNING: BULL MARKET!", col=(60, 230, 110),
+   desc="Stock markets are performing well. Stocks and property may benefit, while gold may struggle.",
+   means=(0.16, 0.09, 0.24, 0.16, 0.04, 0.03, 0.02, 0.09)),
+ "Market crash": dict(title="MARKET CRASH", warn="WARNING: MARKET CRASH!", col=(255, 50, 50),
+   desc="Markets are falling sharply. Stocks and property are likely to suffer, while gold, bonds and cash may provide some protection.",
+   means=(-0.17, -0.10, -0.23, -0.17, 0.02, 0.13, 0.03, -0.12)),
+ "High inflation": dict(title="HIGH INFLATION", warn="WARNING: HIGH INFLATION!", col=(255, 170, 0),
+   desc="Prices are rising quickly. Bonds and cash may lose purchasing power, while gold and property may perform better.",
+   means=(-0.03, -0.02, -0.08, -0.03, -0.06, 0.17, -0.02, 0.08)),
+ "Gold rally": dict(title="GOLD RALLY", warn="WARNING: GOLD RALLY!", col=(255, 215, 60),
+   desc="Gold is rising in value. Gold investments may benefit, while other assets receive no special boost.",
+   means=(0.06, 0.05, 0.07, 0.06, 0.04, 0.20, 0.02, 0.06)),
+ "No event": dict(title="NO MAJOR EVENT", warn="No major market event this year.", col=(150, 150, 175),
+   desc="Markets follow their normal expected return assumptions, but random gains and losses can still occur.",
+   means=(0.08, 0.05, 0.12, 0.08, 0.04, 0.05, 0.02, 0.06)),
+}
+EV_SHORT = {"Bull market": "RALLY", "Market crash": "CRASH", "High inflation": "INFL", "Gold rally": "GOLD", "No event": "-"}
+def generate_return(mean, vol): return max(-0.95, random.gauss(mean, vol))
+def adjust_expected(mean, adj): return mean + random.uniform(-adj, adj)
+def fm(x): return f"£{x:,.2f}"
+def fs(x): return f"{'+' if x >= 0 else '-'}£{abs(x):,.2f}"
+def now(): return pygame.time.get_ticks() / 1000
+
+# ------------------------------------------------------------------ NEW (Upgrade 1-3): market cycle settings
+# Every tunable number for the market simulation lives here.
+CFG = dict(
+    PEAK_WINDOW=5,         # how many index points count as the "recent peak"
+    DIP_THRESHOLD=0.12,    # fall from recent peak (12%) that flags a possible dip
+    MOMENTUM=0.15,         # extra expected return per 1.0 of last year's market return (bull/recovery only)
+    OVEREXTEND_YEARS=3,    # after this many bull years, correction risk rises
+    EARLY_EXIT=0.08,       # small yearly chance a phase ends before its planned length
+    RECOVERY_BOOST=0.25,   # recovery adds this share of the current drawdown to expected stock returns
+)
+BETA = (1.0, 0.6, 1.6)  # how strongly BHRD / BPOP / MDTA follow the market trend
+PHASES = ["Bull Market", "Bear Market", "Market Correction", "Recovery", "Sideways Market"]
+PHASE_TREND = {"Bull Market": 0.04, "Bear Market": -0.06, "Market Correction": -0.08, "Recovery": 0.05, "Sideways Market": 0.0}
+PHASE_VOL = {"Bull Market": 0.9, "Bear Market": 1.3, "Market Correction": 1.4, "Recovery": 1.1, "Sideways Market": 0.8}
+PHASE_LEN = {"Bull Market": (2, 5), "Bear Market": (1, 3), "Market Correction": (1, 2), "Recovery": (1, 3), "Sideways Market": (1, 3)}
+PHASE_START = {"Bull Market": 30, "Bear Market": 15, "Market Correction": 0, "Recovery": 15, "Sideways Market": 40}
+TRANSITIONS = {
+    "Bull Market": {"Market Correction": 35, "Sideways Market": 45, "Bear Market": 20},
+    "Bear Market": {"Recovery": 65, "Sideways Market": 35},
+    "Market Correction": {"Bear Market": 35, "Recovery": 45, "Sideways Market": 20},
+    "Recovery": {"Bull Market": 60, "Sideways Market": 25, "Market Correction": 15},
+    "Sideways Market": {"Bull Market": 45, "Bear Market": 25, "Market Correction": 30},
+}
+PH_COL = {"Bull Market": (60, 230, 110), "Bear Market": (255, 70, 70), "Market Correction": (255, 150, 0),
+          "Recovery": (0, 200, 230), "Sideways Market": (150, 150, 170)}
+PH_SHORT = {"Bull Market": "BULL", "Bear Market": "BEAR", "Market Correction": "CORR", "Recovery": "RECOV", "Sideways Market": "SIDE"}
+START_PRICES = dict(BHRD=100.0, BPOP=60.0, MDTA=150.0)
+SENT_LABELS = ["EXTREME FEAR", "FEAR", "NEUTRAL", "GREED", "EXTREME GREED"]
+SENT_COL = [(255, 60, 60), (255, 140, 0), (170, 170, 190), (140, 230, 90), (60, 255, 120)]
+SENT_BASE = {"Bull Market": 0.72, "Recovery": 0.55, "Sideways Market": 0.5, "Market Correction": 0.28, "Bear Market": 0.15}
+
+def choose_next_phase(phase, age):
+    """Pick the next market phase. Long bull runs raise (never force) the chance of a correction."""
+    opts = dict(TRANSITIONS[phase])
+    if phase == "Bull Market" and age >= CFG["OVEREXTEND_YEARS"]:
+        opts["Market Correction"] *= 1 + 0.5 * (age - CFG["OVEREXTEND_YEARS"] + 1)
+    return random.choices(list(opts), weights=list(opts.values()), k=1)[0]
+
+def trend_adjustments(phase, last_market_return, drawdown):
+    """Extra expected return for each asset (same order as NAMES). Applied once per year, before generate_return."""
+    t = PHASE_TREND[phase]
+    if phase in ("Bull Market", "Recovery"):  # momentum: gains make further gains more likely
+        t += CFG["MOMENTUM"] * max(-0.1, min(0.25, last_market_return))
+    if phase == "Recovery":  # rebound from depressed prices
+        t += CFG["RECOVERY_BOOST"] * drawdown
+    return [t * BETA[0], t * BETA[1], t * BETA[2], t, -0.1 * t, -0.2 * t, 0.0, 0.5 * t]
+
+class Game:
+    def __init__(s): s.reset()
+    def reset(s):
+        s.start = random.randint(80000, 120000); s.pf = s.start; s.year = 0
+        mk = lambda n, t, st, bo, go, re, c: dict(name=n, tag=t, pf=100000.0, col=c,
+              al=dict(stock=st, bond=bo, gold=go, re=re, cash=100 - st - bo - go - re))
+        s.comps = [mk("The Guardian", "CONSERVATIVE", 15, 35, 20, 10, (0, 255, 240)),
+                   mk("The Strategist", "BALANCED", 40, 25, 10, 15, (255, 230, 0)),
+                   mk("The Maverick", "AGGRESSIVE", 75, 5, 5, 10, (255, 40, 200))]
+        s.alloc = dict(stock=40, bond=20, gold=10, re=10); s.sub = [50, 30, 20]
+        s.last = None; s.last_gain = None; s.last_ret = None; s.last_rets = None
+        s.summary = []; s.result = None
+        # NEW (Upgrade 1-2): market state, reset for every new game
+        s.phase_name = None; s.phase_age = 0; s.phase_left = 0; s.phase_changed = False
+        s.prices = dict(START_PRICES); s.index = 100.0
+        s.peak = 100.0; s.drawdown = 0.0; s.dip = False; s.recovering = False; s.since_dip = 99
+        # NEW (Upgrade 3): history lists used by the monitors and charts (index 0 = starting values)
+        s.price_hist = {c: [START_PRICES[c]] for c in STOCKS}
+        s.index_hist = [100.0]; s.phase_hist = []; s.event_hist = []; s.ret_hist = []
+        s.pf_hist = {"You": [float(s.start)]}
+        for c in s.comps: s.pf_hist[c["name"]] = [100000.0]
+        s.begin_year()
+    # NEW (Upgrade 1): persistent market phase
+    def update_market_phase(s):
+        s.phase_changed = False
+        if s.phase_name is None:
+            s.phase_name = random.choices(PHASES, weights=[PHASE_START[p] for p in PHASES], k=1)[0]
+            s.phase_age = 1; s.phase_left = random.randint(*PHASE_LEN[s.phase_name]) - 1; s.phase_changed = True
+            return
+        s.phase_age += 1; s.phase_left -= 1
+        if s.phase_left < 0 or (s.phase_age >= 2 and random.random() < CFG["EARLY_EXIT"]):
+            s.phase_name = choose_next_phase(s.phase_name, s.phase_age)
+            s.phase_age = 1; s.phase_left = random.randint(*PHASE_LEN[s.phase_name]) - 1; s.phase_changed = True
+    def begin_year(s):
+        s.year += 1; s.prev = s.pf
+        s.update_market_phase()                                   # long-term trend (persistent)
+        s.event = random.choices(EV_KEYS, weights=(15, 5, 10, 20, 50), k=1)[0]  # yearly event (separate)
+        last_mkt = s.last_rets[3] if s.last_rets else 0.0
+        s.trend_adj = trend_adjustments(s.phase_name, last_mkt, s.drawdown)
+        s.means = [adjust_expected(m + a, adj) for m, a, adj in zip(EV[s.event]["means"], s.trend_adj, ADJ)]
+        s.vols = [v * PHASE_VOL[s.phase_name] if i < 4 else v for i, v in enumerate(VOL)]
+        s.rets = [generate_return(m, v) for m, v in zip(s.means, s.vols)]  # hidden until the year is confirmed
+        s.phase = "event"; s.phase_t = now()
+    def confirm(s, keep=False):
+        if keep and s.last: s.alloc = dict(s.last[0]); s.sub = list(s.last[1])
+        a, p = s.alloc, s.prev
+        cash = 100 - sum(a.values())
+        st = [p * a["stock"] / 100 * s.sub[i] / 100 * (1 + s.rets[i]) for i in range(3)]
+        bond = p * a["bond"] / 100 * (1 + s.rets[4]); gold = p * a["gold"] / 100 * (1 + s.rets[5])
+        cashv = p * cash / 100 * (1 + s.rets[6]); re = p * a["re"] / 100 * (1 + s.rets[7])
+        s.result = [("BHRD", st[0], s.rets[0]), ("BPOP", st[1], s.rets[1]), ("MDTA", st[2], s.rets[2]),
+                    ("Total stocks", sum(st), s.rets[3]), ("Bonds", bond, s.rets[4]), ("Gold", gold, s.rets[5]),
+                    ("Cash", cashv, s.rets[6]), ("Real estate", re, s.rets[7])]
+        s.pf = sum([sum(st), bond, gold, cashv, re])
+        s.last_gain = s.pf - p; s.last_ret = s.last_gain / p * 100
+        s.summary.append([s.year, s.event, p, s.last_gain, s.last_ret, s.pf])
+        s.last = (dict(a), list(s.sub))
+        s.record_year(); s.phase = "result"
+    # NEW (Upgrade 3): update prices, competitors and history once the year is confirmed
+    def record_year(s):
+        for i, c in enumerate(STOCKS):                       # price falls/rises by exactly the stock's return
+            s.prices[c] *= 1 + s.rets[i]; s.price_hist[c].append(s.prices[c])
+        s.index *= 1 + s.rets[3]; s.index_hist.append(s.index)
+        s.phase_hist.append(s.phase_name); s.event_hist.append(s.event)
+        s.ret_hist.append([s.rets[3], s.rets[4], s.rets[5], s.rets[6], s.rets[7]])
+        s.last_rets = list(s.rets)
+        r = dict(stock=s.rets[3], bond=s.rets[4], gold=s.rets[5], cash=s.rets[6], re=s.rets[7])
+        for c in s.comps:                                      # competitors use the SAME returns as the player
+            c["prev"] = c["pf"]; c["pf"] = sum(c["prev"] * c["al"][k] / 100 * (1 + r[k]) for k in r)
+            s.pf_hist[c["name"]].append(c["pf"])
+        s.pf_hist["You"].append(s.pf)
+        s.update_market_signals()
+    # NEW (Upgrade 2): dip / recovery detection from the market index
+    def update_market_signals(s):
+        window = s.index_hist[-CFG["PEAK_WINDOW"]:]
+        s.peak = max(window); s.drawdown = max(0.0, (s.peak - s.index) / s.peak)
+        s.dip = s.drawdown >= CFG["DIP_THRESHOLD"]
+        s.since_dip = 0 if s.dip else s.since_dip + 1
+        s.recovering = s.rets[3] > 0 and s.drawdown > 0.03 and s.since_dip <= 2
+    def advance(s):
+        if s.year >= YEARS:
+            s.board = sorted([("You", s.pf, s.start)] + [(c["name"], c["pf"], 100000) for c in s.comps],
+                             key=lambda r: r[1], reverse=True)
+            s.phase = "final"
+        else: s.begin_year()
+
+g = Game(); tab = 0; chart_sel = 0
+
+def sentiment():
+    """0-4 sentiment level from trend, last market return and drawdown."""
+    last = g.last_rets[3] if g.last_rets else 0.0
+    score = max(0.0, min(1.0, SENT_BASE[g.phase_name] + last * 0.8 - g.drawdown * 0.6))
+    return min(4, int(score * 5))
+
+# NEW (Upgrade 6): plain-English insights built from live data
+def make_insights():
+    out = []; dd = g.drawdown * 100
+    if g.dip and g.recovering: out.append(f"The market is {dd:.0f}% below its recent peak but rose last year. Recovery remains uncertain and losses could return.")
+    elif g.dip: out.append(f"The market is {dd:.0f}% below its recent peak. Further losses remain possible, so a dip is not a guaranteed opportunity.")
+    elif g.recovering: out.append(f"The market has entered a recovery phase, but prices remain {dd:.0f}% below their previous high.")
+    elif g.phase_name == "Bull Market" and g.phase_age >= CFG["OVEREXTEND_YEARS"]:
+        out.append(f"The bull run is {g.phase_age} years old. Long gains can leave markets overextended, which raises (but does not guarantee) correction risk.")
+    elif dd >= 1: out.append(f"The market is {dd:.0f}% below its recent peak.")
+    else: out.append("The market is at or near its recent peak.")
+    out.append(f"Current market trend: {g.phase_name}. Trends often last several years but can change without warning.")
+    if g.last_rets:
+        best = max(range(3), key=lambda i: g.last_rets[i]); others = [VOL[i] for i in range(3) if i != best]
+        cmp_ = "remains higher" if VOL[best] > sum(others) / 2 else "is lower"
+        out.append(f"{STOCKS[best]} outperformed the other stocks last year ({g.last_rets[best] * 100:+.1f}%), but its volatility {cmp_} ({VOL[best] * 100:.0f}%).")
+    if g.event != "No event": out.append(f"This year's event ({EV[g.event]['title'].lower()}) acts on top of the {g.phase_name.lower()} trend.")
+    st = g.alloc["stock"]; cash = 100 - sum(g.alloc.values())
+    if st >= 60: out.append(f"Your portfolio is heavily concentrated in stocks ({st}%), increasing its exposure to market declines.")
+    elif cash > 50: out.append(f"Over half your portfolio ({cash}%) is in cash. It limits losses in a decline but may lag in a recovery.")
+    elif st == 0: out.append("You hold no stocks, so you would miss stock-market rallies but avoid stock-market declines.")
+    else: out.append(f"Your portfolio is spread across assets (stocks {st}%, cash {cash}%), which can reduce reliance on any single market.")
+    return out
+
+# ------------------------------------------------------------------ pixel scene
+P = dict(void=(10, 8, 20), wall=(24, 22, 48), wall2=(18, 16, 38), desk=(120, 76, 44), desk_hi=(160, 106, 64),
+         desk2=(84, 52, 32), desk3=(56, 34, 22), bezel=(150, 150, 165), bezel2=(88, 88, 104), screen=(6, 20, 14),
+         green=(60, 255, 120), amber=(255, 170, 30), red=(255, 60, 60), cyan=(60, 220, 255), white=(235, 235, 245),
+         skin=(240, 190, 150), hair=(70, 40, 25), shirt=(215, 215, 235), shirt2=(170, 170, 200),
+         chair=(130, 32, 54), chair2=(84, 20, 38), steam=(190, 190, 215), paper=(235, 225, 190), note=(255, 230, 80))
+px = pygame.Surface((PW, PH)); scaled = pygame.Surface((HALF, H))
+_r = random.Random(7)
+BUILD = [(x, _r.randint(12, 28), _r.randint(6, 11)) for x in range(0, 36, 8)]
+confetti = []
+scan = pygame.Surface((HALF, H), pygame.SRCALPHA)
+for y in range(0, H, 3): pygame.draw.line(scan, (0, 0, 0, 62), (0, y), (HALF, y))
+for i in range(50): pygame.draw.rect(scan, (0, 0, 0, (50 - i) * 3), (i, i, HALF - 2 * i, H - 2 * i), 1)
+
+def get_mood():
+    if g.phase == "final":
+        return "celebrate" if g.board[0][0] == "You" else ("panic" if g.board[-1][0] == "You" else "idle")
+    if g.phase == "result":
+        return "celebrate" if g.last_ret >= 8 else ("panic" if g.last_ret <= -8 else "idle")
+    m = {"Bull market": "celebrate", "Gold rally": "celebrate", "Market crash": "panic", "High inflation": "worry"}.get(g.event, "idle")
+    return "worry" if (m == "idle" and g.dip) else m
+
+def ptxt(s, col, x, y, right=False):
+    img = pxfont.render(s, False, col); px.blit(img, (x - img.get_width() if right else x, y))
+def tri(surf, x, y, up, col, sz=4):
+    pts = [(x, y - sz), (x - sz, y + sz), (x + sz, y + sz)] if up else [(x, y + sz), (x - sz, y - sz), (x + sz, y - sz)]
+    pygame.draw.polygon(surf, col, pts)
+
+def monitor(r, t, fn):
+    glow = pygame.Surface((r.w + 24, r.h + 24), pygame.SRCALPHA)
+    fl = int(6 * math.sin(t * 9 + r.x))
+    for pad, a in ((12, 10), (8, 18), (4, 26)):
+        pygame.draw.rect(glow, (60, 255, 120, a + fl), (12 - pad, 12 - pad, r.w + 2 * pad, r.h + 2 * pad), border_radius=3)
+    px.blit(glow, (r.x - 12, r.y - 12))
+    pygame.draw.rect(px, P["bezel2"], r.inflate(6, 6)); pygame.draw.rect(px, P["bezel"], r.inflate(6, 6), 1)
+    pygame.draw.rect(px, P["screen"], r)
+    px.set_clip(r); fn(r, t); px.set_clip(None)
+    pygame.draw.rect(px, P["bezel2"], (r.centerx - 3, r.bottom + 3, 6, 5))
+    pygame.draw.rect(px, P["bezel"], (r.centerx - 9, r.bottom + 7, 18, 2))
+
+# NEW (Upgrade 4): Monitor 1 - live stock prices, annual change, direction arrows, scrolling ticker
+def mon_prices(r, t):
+    for i, c in enumerate(STOCKS):
+        y = r.y + 2 + i * 9; ch = g.last_rets[i] * 100 if g.last_rets else None
+        col = P["white"] if ch is None else (P["green"] if ch >= 0 else P["red"])
+        if ch is not None: tri(px, r.x + 3, y + 4, ch >= 0, col, 2)
+        pr = g.prices[c]; ps = f"{pr:.0f}" if pr < 1000 else f"{pr / 1000:.1f}k"
+        ptxt(f"{c} {ps}", col, r.x + 7, y)
+        ptxt("--" if ch is None else f"{ch:+.0f}", col, r.right - 2, y, True)
+    parts = [f"{c} {g.prices[c]:.1f} " + (f"{g.last_rets[i] * 100:+.1f}%" if g.last_rets else "--") for i, c in enumerate(STOCKS)]
+    img = pxfont.render("   ".join(parts) + "   ", False, P["amber"]); off = (t * 14) % img.get_width()
+    px.blit(img, (r.x - off, r.y + 31)); px.blit(img, (r.x - off + img.get_width(), r.y + 31))
+
+# NEW (Upgrade 4): Monitor 2 - market intelligence (phase, event, sentiment, drawdown, alerts, index sparkline)
+def mon_intel(r, t):
+    pc = PH_COL[g.phase_name]
+    ptxt(f"{PH_SHORT[g.phase_name]} {EV_SHORT[g.event]}", pc, r.x + 2, r.y + 2)
+    lvl = sentiment(); ptxt("SENT", P["white"], r.x + 2, r.y + 11)
+    for k in range(5): pygame.draw.rect(px, SENT_COL[lvl] if k <= lvl else (30, 40, 34), (r.x + 24 + k * 7, r.y + 13, 6, 5))
+    ptxt(f"PEAK-{g.drawdown * 100:.0f}%", P["red"] if g.dip else P["white"], r.x + 2, r.y + 20)
+    blink = int(t * 2) % 2 == 0
+    if g.dip and g.recovering: ptxt("DIP:REBOUND", P["amber"] if blink else P["green"], r.x + 2, r.y + 29)
+    elif g.dip: ptxt("BUY-DIP?", P["amber"] if blink else P["red"], r.x + 2, r.y + 29)
+    elif g.recovering: ptxt("RECOVERING", P["green"], r.x + 2, r.y + 29)
+    else: ptxt("NO SIGNAL", (90, 120, 100), r.x + 2, r.y + 29)
+    h = g.index_hist; lo, hi = min(h), max(h); sp = max(hi - lo, 1e-6); y0, y1 = r.y + 39, r.bottom - 2
+    pts = [(r.x + 2 + i * (r.w - 4) / max(1, YEARS) , y1 - (v - lo) / sp * (y1 - y0)) for i, v in enumerate(h)]
+    if len(pts) > 1: pygame.draw.lines(px, P["green"] if h[-1] >= h[0] else P["red"], False, pts)
+    if int(t * 3) % 2: pygame.draw.rect(px, P["white"], (int(pts[-1][0]) - 1, int(pts[-1][1]) - 1, 2, 2))
+
+# NEW (Upgrade 4): Monitor 3 - portfolio performance, best/worst asset, competitor leader
+def mon_perf(r, t):
+    ptxt(f"£{g.pf / 1000:.1f}K", P["amber"], r.x + 2, r.y + 2)
+    if g.last_ret is not None: ptxt(f"{g.last_ret:+.1f}%", P["green"] if g.last_ret >= 0 else P["red"], r.right - 2, r.y + 2, True)
+    else: ptxt("--", P["white"], r.right - 2, r.y + 2, True)
+    if g.last_rets:
+        idx = [0, 1, 2, 4, 5, 6, 7]; b = max(idx, key=lambda i: g.last_rets[i]); w = min(idx, key=lambda i: g.last_rets[i])
+        ptxt(f"BEST {CODES[b]}", P["green"], r.x + 2, r.y + 11); ptxt(f"{g.last_rets[b] * 100:+.0f}", P["green"], r.right - 2, r.y + 11, True)
+        ptxt(f"WRST {CODES[w]}", P["red"], r.x + 2, r.y + 20); ptxt(f"{g.last_rets[w] * 100:+.0f}", P["red"], r.right - 2, r.y + 20, True)
+    else:
+        ptxt("BEST --", P["white"], r.x + 2, r.y + 11); ptxt("WRST --", P["white"], r.x + 2, r.y + 20)
+    lead = max([("YOU", g.pf)] + [(c["name"].replace("The ", "")[:5].upper(), c["pf"]) for c in g.comps], key=lambda x: x[1])
+    ptxt(f"LEAD {lead[0]}", P["cyan"], r.x + 2, r.y + 29)
+    if int(t * 2) % 2: ptxt("_", P["green"], r.right - 6, r.y + 31)
+
+def draw_trader(t, mood):
+    ox = int(math.sin(t * 50) * 1.5) if mood == "panic" else 0
+    oy = int(-abs(math.sin(t * 7)) * 4) if mood == "celebrate" else 0
+    hx = ox + (int(math.sin(t * 4)) if mood == "worry" else 0)
+    pygame.draw.rect(px, P["chair2"], (66 + ox, 122 + oy, 68, 66), border_radius=10)
+    pygame.draw.rect(px, P["chair"], (70 + ox, 126 + oy, 60, 58), border_radius=8)
+    pygame.draw.rect(px, P["bezel2"], (98, 208, 4, 8)); pygame.draw.line(px, P["bezel2"], (80, 216), (120, 216), 2)
+    for wx in (80, 100, 120): pygame.draw.rect(px, P["void"], (wx - 1, 217, 3, 3))
+    pygame.draw.rect(px, P["shirt"], (82 + ox, 138 + oy, 36, 56)); pygame.draw.rect(px, P["shirt2"], (82 + ox, 138 + oy, 5, 56))
+    pygame.draw.rect(px, P["shirt"], (76 + ox, 134 + oy, 48, 12), border_radius=4)
+    pygame.draw.rect(px, P["skin"], (96 + hx, 131 + oy, 8, 5))
+    pygame.draw.circle(px, P["hair"], (100 + hx, 124 + oy), 10)
+    pygame.draw.rect(px, P["skin"], (89 + hx, 125 + oy, 2, 3)); pygame.draw.rect(px, P["skin"], (109 + hx, 125 + oy, 2, 3))
+    for side in (-1, 1):
+        sh = (100 + side * 22 + ox, 140 + oy)
+        if mood == "panic": hd = (100 + side * 16 + ox, 118 + oy)
+        elif mood == "celebrate": hd = (100 + side * 34 + ox + int(math.sin(t * 10) * 2), 98 + oy)
+        else: hd = (100 + side * 14 + ox, 150 + (1 if (int(t * 8) + side) % 2 else 0))
+        pygame.draw.line(px, P["shirt"], sh, hd, 4); pygame.draw.circle(px, P["skin"], hd, 2)
+    if mood in ("panic", "worry"):
+        for i in range(3): pygame.draw.rect(px, P["cyan"], (112 + i * 3, 110 + (t * 20 + i * 7) % 14, 2, 2))
+    if mood == "panic" and int(t * 4) % 2: px.blit(pxfont.render("!!", False, P["red"]), (116, 104))
+
+def draw_scene(t, dt):
+    mood = get_mood()
+    px.fill(P["wall"]); pygame.draw.rect(px, P["wall2"], (0, 96, PW, 20))
+    pygame.draw.rect(px, P["bezel2"], (6, 6, 52, 42)); pygame.draw.rect(px, (14, 12, 40), (8, 8, 48, 38))
+    pygame.draw.circle(px, P["paper"], (50, 16), 3)
+    for bx, bh, bw in BUILD:
+        pygame.draw.rect(px, (22, 20, 56), (10 + bx, 46 - bh, bw, bh))
+        for wy in range(46 - bh + 2, 44, 4):
+            for wx in range(10 + bx + 1, 10 + bx + bw - 1, 3):
+                if hash((wx, wy)) % 3 == 0 and (int(t * 1.5) + wx * wy) % 7: px.set_at((wx, wy), P["amber"])
+    pygame.draw.rect(px, P["paper"], (152, 10, 36, 46)); pygame.draw.rect(px, P["desk3"], (152, 10, 36, 46), 1)
+    px.blit(pxfont.render("BUY", False, P["red"]), (160, 18)); px.blit(pxfont.render("LOW", False, P["green"]), (160, 30))
+    px.blit(pxfont.render("SELL", False, P["red"]), (158, 42))
+    pygame.draw.circle(px, P["white"], (118, 22), 9, 1)
+    pygame.draw.line(px, P["white"], (118, 22), (118 + 7 * math.sin(t * 2), 22 - 7 * math.cos(t * 2)))
+    pygame.draw.line(px, P["amber"], (118, 22), (118 + 4 * math.sin(t / 6), 22 - 4 * math.cos(t / 6)))
+    monitor(pygame.Rect(3, 62, 60, 42), t, mon_prices)
+    monitor(pygame.Rect(69, 50, 62, 54), t, mon_intel)
+    monitor(pygame.Rect(137, 62, 60, 42), t, mon_perf)
+    pygame.draw.rect(px, P["desk"], (0, 112, PW, 40)); pygame.draw.line(px, P["desk_hi"], (0, 112), (PW, 112))
+    pygame.draw.rect(px, P["desk2"], (0, 152, PW, 56))
+    for dx in (14, 134):
+        pygame.draw.rect(px, P["desk3"], (dx, 160, 52, 40), 1); pygame.draw.rect(px, P["amber"], (dx + 24, 178, 4, 2))
+    pygame.draw.rect(px, P["void"], (0, 208, PW, 17))
+    pygame.draw.rect(px, P["paper"], (146 + int(math.sin(t * 0.8) * 1.5), 126, 26, 18))
+    pygame.draw.rect(px, P["paper"], (150, 124, 26, 18)); pygame.draw.rect(px, P["desk3"], (150, 124, 26, 18), 1)
+    for ly in range(128, 140, 3): pygame.draw.line(px, (140, 130, 100), (153, ly), (172, ly))
+    pygame.draw.rect(px, P["red"], (166, 144, 22, 5)); pygame.draw.rect(px, P["desk3"], (166, 144, 22, 5), 1)
+    pygame.draw.rect(px, P["white"], (28, 136, 9, 9)); pygame.draw.rect(px, P["desk3"], (28, 136, 9, 9), 1)
+    pygame.draw.rect(px, P["desk3"], (29, 137, 7, 2))
+    for i in range(4):
+        pygame.draw.rect(px, P["steam"], (31 + int(math.sin(t * 3 + i * 1.3) * 2), 134 - (t * 10 + i * 4) % 14, 1, 2))
+    pygame.draw.rect(px, P["bezel2"], (76, 140, 48, 8)); pygame.draw.rect(px, P["bezel"], (76, 140, 48, 8), 1)
+    draw_trader(t, mood)
+    if mood == "celebrate" and random.random() < 0.7:
+        confetti.append([random.uniform(0, PW), -2, random.uniform(25, 50), random.choice((P["red"], P["green"], P["amber"], P["cyan"]))])
+    for c in confetti: c[1] += c[2] * dt; pygame.draw.rect(px, c[3], (int(c[0]), int(c[1]), 2, 2))
+    confetti[:] = [c for c in confetti if c[1] < PH]
+    pygame.transform.scale(px, (HALF, H), scaled)
+    screen.blit(scaled, (0, 0))
+    scan.set_alpha(215 + random.randint(0, 40)); screen.blit(scan, (0, 0))
+
+# ------------------------------------------------------------------ UI helpers
+def text(s, txt, font, col, pos, anchor="topleft"):
+    img = font.render(str(txt), True, col); r = img.get_rect(**{anchor: pos}); s.blit(img, r); return r
+def wrap(s, font, width):
+    lines, cur = [], ""
+    for w in s.split():
+        t = (cur + " " + w).strip()
+        if font.size(t)[0] <= width: cur = t
+        else: lines.append(cur); cur = w
+    return lines + ([cur] if cur else [])
+def box(r, title=None):
+    pygame.draw.rect(screen, PANEL, r); pygame.draw.rect(screen, LINE, r, 1)
+    if title:
+        img = f_s.render(f" {title} ", True, CYAN); rr = img.get_rect(topleft=(r.x + 10, r.y - 9))
+        pygame.draw.rect(screen, BG, rr); screen.blit(img, rr)
+def button(r, label, col=AMBER):
+    hov = r.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, col if hov else (30, 20, 6), r); pygame.draw.rect(screen, col, r, 2)
+    text(screen, label, f_mb, (0, 0, 0) if hov else col, r.center, "center")
+def sgn(v): return UP if v >= 0 else RED
+
+X0 = HALF + 20
+TABS = ["1 DESK", "2 EXPECTED", "3 COMPETITORS", "4 MARKET ANALYSIS"]
+TAB_R = [pygame.Rect(X0 + i * 190, 46, 184, 30) for i in range(4)]
+BTN_MAIN, BTN_KEEP = pygame.Rect(X0, 790, 760, 46), pygame.Rect(X0, 842, 760, 38)
+AL = [("stock", "STOCKS", AMBER), ("bond", "BONDS", CYAN), ("gold", "GOLD", (255, 215, 60)), ("re", "REAL ESTATE", PGREEN)]
+AL_R = [pygame.Rect(X0, 338 + 46 * i, 760, 38) for i in range(4)]
+SUB = [("BHRD", AMBER), ("BPOP", CYAN), ("MDTA", PGREEN)]
+SUB_R = [pygame.Rect(X0, 592 + 38 * i, 760, 32) for i in range(3)]
+CH_R = [pygame.Rect(X0 + i * 190, 266, 184, 28) for i in range(4)]
+CH_NAMES = ["A STOCK PRICES", "B MARKET INDEX", "C VS COMPETITORS", "D ASSET RETURNS"]
+
+def track(r): return pygame.Rect(r.x + 135, r.centery - 3, r.w - 135 - 170, 6)
+def slider(r, label, v, col, extra):
+    text(screen, label, f_m, col, (r.x, r.centery), "midleft")
+    tr = track(r); pygame.draw.rect(screen, (40, 30, 12), tr)
+    pygame.draw.rect(screen, col, (tr.x, tr.y, int(tr.w * v / 100), tr.h))
+    hx = tr.x + tr.w * v / 100; h = pygame.Rect(0, 0, 10, 22); h.center = (hx, tr.centery)
+    pygame.draw.rect(screen, col, h); pygame.draw.rect(screen, (255, 255, 255), h, 1)
+    text(screen, f"{v:>3}%  {extra}", f_s, PGREEN, (r.right, r.centery), "midright")
+def sval(r, x): tr = track(r); return round(max(0, min(1, (x - tr.x) / tr.w)) * 100)
+
+def set_alloc(k, v):
+    others = sum(g.alloc[o] for o in g.alloc if o != k); g.alloc[k] = max(0, min(v, 100 - others))
+def set_sub(i, v):
+    v = max(0, min(100, v)); j, k = [x for x in range(3) if x != i]
+    old = g.sub[j] + g.sub[k]; rem = 100 - v
+    nj = rem // 2 if old == 0 else round(rem * g.sub[j] / old)
+    g.sub[i], g.sub[j], g.sub[k] = v, nj, rem - nj
+
+# ------------------------------------------------------------------ right-hand tabs
+def draw_desk():
+    box(pygame.Rect(X0, 92, 760, 96), "PORTFOLIO")
+    text(screen, fm(g.pf), f_xl, AMBER, (X0 + 16, 104)); text(screen, f"START {fm(g.start)}", f_s, PGREEN, (X0 + 16, 158))
+    tg = g.pf - g.start
+    cols = [(X0 + 330, 98, "ANNUAL GAIN/LOSS", None if g.last_gain is None else fs(g.last_gain), g.last_gain or 0),
+            (X0 + 560, 98, "ANNUAL RETURN", None if g.last_ret is None else f"{g.last_ret:+.2f}%", g.last_ret or 0),
+            (X0 + 330, 140, "TOTAL GAIN", fs(tg), tg), (X0 + 560, 140, "TOTAL RETURN", f"{tg / g.start * 100:+.2f}%", tg)]
+    for x, y, lab, val, raw in cols:
+        text(screen, lab, f_s, CYAN, (x, y)); text(screen, val or "--", f_l, sgn(raw) if val else (120, 120, 120), (x, y + 18))
+    # NEW: market intel strip (trend + event + sentiment + dip alert)
+    e = EV[g.event]; box(pygame.Rect(X0, 204, 760, 100), "MARKET INTEL")
+    text(screen, "TREND", f_s, CYAN, (X0 + 14, 214))
+    text(screen, f"{g.phase_name.upper()} (YEAR {g.phase_age} OF PHASE)", f_mb, PH_COL[g.phase_name], (X0 + 70, 211))
+    lvl = sentiment(); text(screen, f"SENTIMENT: {SENT_LABELS[lvl]}", f_s, SENT_COL[lvl], (X0 + 746, 214), "topright")
+    text(screen, "EVENT", f_s, CYAN, (X0 + 14, 236)); text(screen, e["title"], f_mb, e["col"], (X0 + 70, 233))
+    for i, ln in enumerate(wrap(e["desc"], f_s, 735)[:2]): text(screen, ln, f_s, PGREEN, (X0 + 14, 256 + i * 15))
+    dd = g.drawdown * 100
+    if g.dip and g.recovering: msg, mc = f"DIP + REBOUND: market {dd:.0f}% below peak but rising. Outcome uncertain.", (255, 200, 0)
+    elif g.dip: msg, mc = f"DIP ALERT: market {dd:.0f}% below peak. Possible opportunity, not guaranteed.", (255, 200, 0)
+    elif g.recovering: msg, mc = f"RECOVERY: market rising, still {dd:.0f}% below peak.", (0, 220, 240)
+    else: msg, mc = f"No dip signal: market {dd:.0f}% below recent peak.", (110, 170, 120)
+    text(screen, msg, f_s, mc, (X0 + 14, 286))
+    if g.phase == "result":
+        box(pygame.Rect(X0, 322, 760, 360), f"YEAR {g.year} RESULTS")
+        for i, (n, v, rt) in enumerate(g.result):
+            y = 346 + i * 38
+            text(screen, n.upper(), f_m, AMBER, (X0 + 20, y)); text(screen, fm(v), f_m, PGREEN, (X0 + 380, y), "topright")
+            text(screen, f"{rt * 100:+.2f}%", f_m, sgn(rt), (X0 + 740, y), "topright")
+        button(BTN_MAIN, "VIEW FINAL RESULTS  [ENTER]" if g.year >= YEARS else "NEXT YEAR >>  [ENTER]")
+        return
+    text(screen, "OVERALL ALLOCATION", f_mb, CYAN, (X0, 314))
+    for (k, lab, c), r in zip(AL, AL_R): slider(r, lab, g.alloc[k], c, f"£{g.pf * g.alloc[k] / 100:,.0f}")
+    cash = 100 - sum(g.alloc.values()); cc = RED if cash > 50 else PGREEN
+    text(screen, "CASH (AUTO)", f_m, cc, (X0, 521))
+    text(screen, f"{cash}%  £{g.pf * cash / 100:,.0f}" + ("   WARNING: OVER 50% IN CASH!" if cash > 50 else ""), f_m, cc, (X0 + 135, 521))
+    xx = X0
+    for v, c in ((g.alloc["stock"], AMBER), (g.alloc["bond"], CYAN), (g.alloc["gold"], (255, 215, 60)), (g.alloc["re"], PGREEN), (cash, RED if cash > 50 else (110, 110, 130))):
+        w = int(760 * v / 100); pygame.draw.rect(screen, c, (xx, 547, w, 11)); xx += w
+    pygame.draw.rect(screen, LINE, (X0, 547, 760, 11), 1)
+    if g.alloc["stock"] > 0:
+        tot = sum(g.sub)
+        text(screen, "STOCK SPLIT - MUST TOTAL 100% OF STOCK ALLOCATION", f_s, CYAN, (X0, 568))
+        text(screen, f"TOTAL {tot}%", f_s, UP if tot == 100 else RED, (X0 + 760, 568), "topright")
+        for i, ((n, c), r) in enumerate(zip(SUB, SUB_R)):
+            slider(r, n, g.sub[i], c, f"£{g.pf * g.alloc['stock'] / 100 * g.sub[i] / 100:,.0f}")
+    else:
+        text(screen, "Set Stocks above 0% to choose BHRD / BPOP / MDTA.", f_s, (120, 120, 120), (X0, 600))
+    box(pygame.Rect(X0, 710, 760, 72), "INSIGHT")
+    ins = make_insights(); ln = wrap(ins[0], f_s, 735)[:2] + wrap(ins[-1], f_s, 735)[:2]
+    for i, l in enumerate(ln): text(screen, l, f_s, PGREEN, (X0 + 12, 718 + i * 15))
+    button(BTN_MAIN, "CONFIRM ALLOCATION / ADVANCE YEAR  [ENTER]")
+    if g.last: button(BTN_KEEP, "KEEP LAST YEAR'S ALLOCATION & ADVANCE", CYAN)
+
+def draw_expected():
+    box(pygame.Rect(X0, 92, 760, 690), "EXPECTED ANNUAL RETURNS - THIS YEAR (incl. market trend)")
+    cx = X0 + 570
+    text(screen, "ASSET", f_s, CYAN, (X0 + 16, 112)); text(screen, "EXPECTED", f_s, CYAN, (X0 + 300, 112))
+    text(screen, "-30%", f_s, CYAN, (cx - 170, 112), "midtop"); text(screen, "0", f_s, CYAN, (cx, 112), "midtop")
+    text(screen, "+30%", f_s, CYAN, (cx + 170, 112), "midtop")
+    for i, n in enumerate(NAMES):
+        y = 150 + i * 70; m = g.means[i]
+        text(screen, n.upper(), f_m, AMBER, (X0 + 16, y))
+        text(screen, f"VOL {g.vols[i] * 100:.1f}% TREND {g.trend_adj[i] * 100:+.1f}%", f_s, (150, 110, 40), (X0 + 16, y + 26))
+        text(screen, f"{m * 100:+.2f}%", f_l, sgn(m), (X0 + 300, y + 4))
+        pygame.draw.line(screen, LINE, (cx, y - 8), (cx, y + 44))
+        w = int(max(-170, min(170, m / 0.30 * 170)))
+        pygame.draw.rect(screen, sgn(m), (min(cx, cx + w), y + 8, abs(w), 18))
+        if g.phase in ("result", "final") and g.result:
+            rv = g.rets[i]; mx = cx + int(max(-170, min(170, rv / 0.30 * 170)))
+            pygame.draw.line(screen, CYAN, (mx, y), (mx, y + 36), 3); text(screen, f"ACTUAL {rv * 100:+.1f}%", f_s, CYAN, (mx, y + 38), "midtop")
+    text(screen, "Estimates only. Realised returns differ and are not guaranteed.", f_s, (150, 110, 40), (X0 + 16, 750))
+
+def draw_comps():
+    a = pygame.Rect(HALF, 84, HALF, H - 84)
+    for i in range(a.h):
+        c = int(i / a.h * 40); pygame.draw.line(screen, (14 + c // 2, 0, 30 + c), (a.x, a.y + i), (a.right, a.y + i))
+    me = dict(g.alloc, cash=100 - sum(g.alloc.values()))
+    ent = [("YOU", "PLAYER", g.pf, g.start, me, (255, 255, 255))] + [(c["name"], c["tag"], c["pf"], 100000, c["al"], c["col"]) for c in g.comps]
+    segs = [("stock", "STK", (255, 60, 200)), ("bond", "BND", (0, 255, 240)), ("gold", "GLD", (255, 230, 0)), ("re", "RE", (170, 255, 0)), ("cash", "CSH", (150, 150, 200))]
+    for rank, (n, tag, v, st, al, col) in enumerate(sorted(ent, key=lambda e: -e[2]), 1):
+        r = pygame.Rect(X0, 100 + (rank - 1) * 188, 760, 176)
+        for k, f in ((8, 0.2), (4, 0.45)): pygame.draw.rect(screen, tuple(int(c * f) for c in col), r.inflate(k * 2, k * 2), 2, border_radius=18 + k)
+        pygame.draw.rect(screen, (22, 8, 46), r, border_radius=18); pygame.draw.rect(screen, col, r, 3, border_radius=18)
+        text(screen, f"#{rank}", n_xl, col, (r.x + 22, r.y + 40))
+        text(screen, n, n_l, col, (r.x + 130, r.y + 14)); text(screen, tag, n_s, (190, 170, 230), (r.x + 130, r.y + 56))
+        text(screen, fm(v), n_l, (255, 255, 255), (r.x + 130, r.y + 78))
+        ret = (v / st - 1) * 100; text(screen, f"{ret:+.2f}%", n_m, UP if ret >= 0 else (255, 90, 110), (r.right - 24, r.y + 84), "topright")
+        xx = r.x + 130
+        for k, lab, c in segs:
+            w = int(600 * al[k] / 100); pygame.draw.rect(screen, c, (xx, r.y + 122, w, 16), border_radius=4); xx += w
+        text(screen, "  ".join(f"{lab} {al[k]}%" for k, lab, c in segs), n_s, (190, 170, 230), (r.x + 130, r.y + 144))
+
+# NEW (Upgrade 5): charts drawn directly with Pygame from the stored history lists
+SC = {"BHRD": AMBER, "BPOP": CYAN, "MDTA": (255, 80, 200)}
+ASSET_COL = [AMBER, CYAN, (255, 215, 60), (130, 130, 150), PGREEN]  # stocks, bonds, gold, cash, real estate
+def nice_scale(lo, hi, n=5):
+    span = max(hi - lo, 1e-9); raw = span / n; mag = 10 ** math.floor(math.log10(raw))
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    return math.floor(lo / step) * step, math.ceil(hi / step) * step, step
+def legend(items, x, y):
+    for lab, col in items:
+        pygame.draw.rect(screen, col, (x, y + 3, 12, 10)); text(screen, lab, f_s, PGREEN, (x + 17, y)); x += 17 + f_s.size(lab)[0] + 16
+def chart_frame(r, title, ylabel, lo, hi, step, yfmt, groups=False):
+    box(r); text(screen, title, f_mb, AMBER, (r.x + 12, r.y + 8)); text(screen, ylabel, f_s, CYAN, (r.x + 12, r.y + 34))
+    pr = pygame.Rect(r.x + 74, r.y + 58, r.w - 94, r.h - 58 - 44)
+    v = lo
+    while v <= hi + 1e-9:
+        y = pr.bottom - (v - lo) / (hi - lo) * pr.h
+        pygame.draw.line(screen, (36, 28, 10), (pr.x, y), (pr.right, y)); text(screen, yfmt(v), f_s, PGREEN, (pr.x - 6, y), "midright"); v += step
+    for i in range(YEARS + 1):
+        x = pr.x + i / YEARS * pr.w; pygame.draw.line(screen, (24, 18, 8), (x, pr.y), (x, pr.bottom))
+        if groups and i < YEARS: text(screen, f"Y{i + 1}", f_s, PGREEN, (x + pr.w / YEARS / 2, pr.bottom + 6), "midtop")
+        elif not groups: text(screen, f"Y{i}", f_s, PGREEN, (x, pr.bottom + 6), "midtop")
+    text(screen, "YEAR", f_s, CYAN, (pr.centerx, pr.bottom + 26), "midtop")
+    pygame.draw.rect(screen, LINE, pr, 1)
+    return pr
+def pts_of(pr, vals, lo, hi): return [(pr.x + i / YEARS * pr.w, pr.bottom - (v - lo) / (hi - lo) * pr.h) for i, v in enumerate(vals)]
+def draw_series(pts, col):
+    if len(pts) > 1: pygame.draw.lines(screen, col, False, pts, 2)
+    for p in pts: pygame.draw.circle(screen, col, p, 3)
+
+def chart_a(r):  # stock price history with peak / worst-year markers
+    allv = [v for c in STOCKS for v in g.price_hist[c]]
+    lo, hi, step = nice_scale(min(allv) * 0.95, max(allv) * 1.05)
+    pr = chart_frame(r, "A  STOCK PRICE HISTORY", "PRICE (£ per share)", lo, hi, step, lambda v: f"{v:.0f}")
+    legend([(c, SC[c]) for c in STOCKS] + [("^ PEAK", (255, 255, 255)), ("v WORST YEAR", RED)], r.x + 190, r.y + 34)
+    for c in STOCKS:
+        vals = g.price_hist[c]; pts = pts_of(pr, vals, lo, hi); draw_series(pts, SC[c])
+        if len(vals) > 1:
+            pk = vals.index(max(vals)); tri(screen, pts[pk][0], pts[pk][1] - 11, True, (255, 255, 255))
+            rets = [vals[i + 1] / vals[i] - 1 for i in range(len(vals) - 1)]; w = rets.index(min(rets))
+            if rets[w] < 0: tri(screen, pts[w + 1][0], pts[w + 1][1] + 11, False, RED)
+
+def chart_b(r):  # market index with coloured phase bands
+    v = g.index_hist; lo, hi, step = nice_scale(min(v) * 0.95, max(v) * 1.05)
+    pr = chart_frame(r, "B  MARKET INDEX (base 100)", "INDEX", lo, hi, step, lambda x: f"{x:.0f}")
+    legend([("BULL", PH_COL["Bull Market"]), ("BEAR", PH_COL["Bear Market"]), ("CORRECTION", PH_COL["Market Correction"]),
+            ("RECOVERY", PH_COL["Recovery"]), ("SIDEWAYS", PH_COL["Sideways Market"])], r.x + 130, r.y + 34)
+    for i, ph in enumerate(g.phase_hist):
+        x0 = pr.x + i / YEARS * pr.w; x1 = pr.x + (i + 1) / YEARS * pr.w
+        band = pygame.Surface((max(1, int(x1 - x0)), pr.h), pygame.SRCALPHA); band.fill((*PH_COL[ph], 48)); screen.blit(band, (x0, pr.y))
+    pts = pts_of(pr, v, lo, hi); draw_series(pts, (255, 255, 255))
+    if len(v) > 1:
+        pk, tr_ = v.index(max(v)), v.index(min(v))
+        tri(screen, pts[pk][0], pts[pk][1] - 11, True, UP)
+        if tr_ != pk: tri(screen, pts[tr_][0], pts[tr_][1] + 11, False, RED)
+
+def chart_c(r):  # player vs competitors
+    allv = [x for vals in g.pf_hist.values() for x in vals]
+    lo, hi, step = nice_scale(min(allv) * 0.95, max(allv) * 1.05)
+    pr = chart_frame(r, "C  PORTFOLIO VS COMPETITORS", "VALUE (£)", lo, hi, step, lambda x: f"£{x / 1000:.0f}k")
+    cols = {"You": (255, 255, 255), **{c["name"]: c["col"] for c in g.comps}}
+    legend([(n.upper(), cols[n]) for n in cols], r.x + 150, r.y + 34)
+    for n, vals in g.pf_hist.items(): draw_series(pts_of(pr, vals, lo, hi), cols[n])
+
+def chart_d(r):  # grouped bars of annual asset returns
+    rows = g.ret_hist; vals = [x for row in rows for x in row] + [0]
+    lo, hi, step = nice_scale(min(vals) - 0.02, max(vals) + 0.02)
+    pr = chart_frame(r, "D  ANNUAL ASSET RETURNS", "RETURN (%)", lo, hi, step, lambda x: f"{x * 100:.0f}%", groups=True)
+    legend(list(zip(["STOCKS", "BONDS", "GOLD", "CASH", "REAL ESTATE"], ASSET_COL)), r.x + 150, r.y + 34)
+    y0 = pr.bottom - (0 - lo) / (hi - lo) * pr.h; gw = pr.w / YEARS; bw = gw * 0.8 / 5
+    for j, row in enumerate(rows):
+        for k, v in enumerate(row):
+            y = pr.bottom - (v - lo) / (hi - lo) * pr.h
+            pygame.draw.rect(screen, ASSET_COL[k], (int(pr.x + j * gw + gw * 0.1 + k * bw), int(min(y, y0)), max(1, int(bw) - 1), max(1, int(abs(y - y0)))))
+    pygame.draw.line(screen, (255, 255, 255), (pr.x, y0), (pr.right, y0), 2)
+    if not rows: text(screen, "No completed years yet", f_m, (120, 120, 120), pr.center, "center")
+
+def draw_analysis():
+    box(pygame.Rect(X0, 92, 760, 164), "INVESTMENT INSIGHTS")
+    y, n = 106, 0
+    for msg in make_insights():
+        for j, ln in enumerate(wrap(msg, f_s, 715)):
+            if n >= 9: break
+            text(screen, ("> " if j == 0 else "  ") + ln, f_s, PGREEN, (X0 + 14, y)); y += 16; n += 1
+    for i, r in enumerate(CH_R):
+        if i == chart_sel: pygame.draw.rect(screen, AMBER, r)
+        else: pygame.draw.rect(screen, LINE, r, 1)
+        text(screen, CH_NAMES[i], f_s, (0, 0, 0) if i == chart_sel else AMBER, r.center, "center")
+    (chart_a, chart_b, chart_c, chart_d)[chart_sel](pygame.Rect(X0, 304, 760, 480))
+
+def draw_final():
+    text(screen, "GAME OVER", f_xl, AMBER, (X0, 84))
+    tg = g.pf - g.start
+    text(screen, f"START {fm(g.start)}   FINAL {fm(g.pf)}", f_m, PGREEN, (X0, 136))
+    text(screen, f"TOTAL {fs(tg)}   RETURN {(g.pf / g.start - 1) * 100:+.2f}%", f_m, sgn(tg), (X0, 160))
+    box(pygame.Rect(X0, 204, 760, 130), "FINAL LEADERBOARD")
+    for i, (n, v, st) in enumerate(g.board):
+        y = 216 + i * 28; c = CYAN if n == "You" else AMBER
+        text(screen, f"{i + 1}. {n}", f_m, c, (X0 + 16, y)); text(screen, fm(v), f_m, PGREEN, (X0 + 440, y), "topright")
+        r = (v / st - 1) * 100; text(screen, f"{r:+.2f}%", f_m, sgn(r), (X0 + 740, y), "topright")
+    box(pygame.Rect(X0, 364, 760, 400), "YEARLY SUMMARY  (see tab 4 for charts)")
+    hd = [("YR", X0 + 16, "topleft"), ("EVENT", X0 + 60, "topleft"), ("START", X0 + 400, "topright"), ("GAIN/LOSS", X0 + 540, "topright"), ("RET", X0 + 630, "topright"), ("END", X0 + 745, "topright")]
+    for t_, x, a in hd: text(screen, t_, f_s, CYAN, (x, 380), a)
+    pygame.draw.line(screen, LINE, (X0 + 10, 400), (X0 + 750, 400))
+    for i, (yr, evn, st, gn, rt, en) in enumerate(g.summary):
+        y = 408 + i * 33
+        text(screen, yr, f_s, AMBER, (X0 + 16, y)); text(screen, evn, f_s, EV[evn]["col"], (X0 + 60, y))
+        text(screen, f"£{st:,.0f}", f_s, PGREEN, (X0 + 400, y), "topright"); text(screen, fs(gn).replace(".00", ""), f_s, sgn(gn), (X0 + 540, y), "topright")
+        text(screen, f"{rt:+.1f}%", f_s, sgn(rt), (X0 + 630, y), "topright"); text(screen, f"£{en:,.0f}", f_s, PGREEN, (X0 + 745, y), "topright")
+    button(BTN_MAIN, "PLAY AGAIN  [ENTER]")
+
+def draw_popup():
+    e = EV[g.event]; k = min(1, (now() - g.phase_t) / 0.35); ease = 1 - (1 - k) ** 3
+    dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 175)); screen.blit(dim, (0, 0))
+    if g.event == "Market crash" and k < 1:
+        fl = pygame.Surface((W, H), pygame.SRCALPHA); fl.fill((255, 0, 0, int(120 * (1 - k)))); screen.blit(fl, (0, 0))
+    r = pygame.Rect(0, 0, int(800 * ease), int(360 * ease)); r.center = (W // 2, H // 2)
+    pygame.draw.rect(screen, (8, 8, 12), r)
+    pulse = 0.65 + 0.35 * math.sin(now() * 8); bc = tuple(int(c * pulse) for c in e["col"])
+    pygame.draw.rect(screen, bc, r, 5); pygame.draw.rect(screen, e["col"], r.inflate(-16, -16), 1)
+    if k >= 1:
+        text(screen, e["warn"], f_l, e["col"], (W // 2, r.y + 34), "center")
+        text(screen, e["title"], f_pop, e["col"], (W // 2, r.y + 100), "center")
+        for i, ln in enumerate(wrap(e["desc"], f_m, 700)): text(screen, ln, f_m, PGREEN, (W // 2, r.y + 170 + i * 26), "center")
+        new = " (NEW PHASE)" if g.phase_changed else ""
+        text(screen, f"MARKET TREND: {g.phase_name.upper()}{new}", f_mb, PH_COL[g.phase_name], (W // 2, r.y + 276), "center")
+        if int(now() * 2) % 2: text(screen, "PRESS ENTER / CLICK TO CONTINUE", f_s, AMBER, (W // 2, r.bottom - 30), "center")
+
+def draw_right():
+    pygame.draw.rect(screen, BG, (HALF, 0, HALF, H))
+    pygame.draw.rect(screen, AMBER, (HALF, 0, HALF, 38))
+    text(screen, "FORTUNE & FALLOUT  TERMINAL <GO>", f_mb, (0, 0, 0), (HALF + 14, 19), "midleft")
+    text(screen, f"YEAR {g.year} OF {YEARS}", f_mb, (0, 0, 0), (W - 14, 19), "midright")
+    for i, r in enumerate(TAB_R):
+        if i == tab: pygame.draw.rect(screen, AMBER, r)
+        else: pygame.draw.rect(screen, LINE, r, 1)
+        text(screen, TABS[i], f_s, (0, 0, 0) if i == tab else AMBER, r.center, "center")
+    if tab == 0: draw_final() if g.phase == "final" else draw_desk()
+    elif tab == 1: draw_expected()
+    elif tab == 2: draw_comps()
+    else: draw_analysis()
+    pygame.draw.line(screen, AMBER, (HALF, 0), (HALF, H), 2)
+
+# ------------------------------------------------------------------ main loop
+def action():
+    global tab
+    if g.phase == "event": g.phase = "allocate"
+    elif g.phase == "allocate": g.confirm()
+    elif g.phase == "result": g.advance()
+    elif g.phase == "final": g.reset(); tab = 0
+
+def main():
+    global tab, chart_sel
+    drag = None
+    while True:
+        dt = clock.tick(60) / 1000; t = now()
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            elif ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE: pygame.quit(); sys.exit()
+                elif ev.key == pygame.K_F11: pygame.display.toggle_fullscreen()
+                elif ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER): action()
+                elif g.phase != "event":
+                    if ev.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4): tab = ev.key - pygame.K_1
+                    elif tab == 3 and ev.key in (pygame.K_a, pygame.K_b, pygame.K_c, pygame.K_d): chart_sel = ev.key - pygame.K_a
+            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                p = ev.pos
+                if g.phase == "event": action(); continue
+                for i, r in enumerate(TAB_R):
+                    if r.collidepoint(p): tab = i
+                if tab == 3:
+                    for i, r in enumerate(CH_R):
+                        if r.collidepoint(p): chart_sel = i
+                    continue
+                if tab != 0: continue
+                if g.phase == "final":
+                    if BTN_MAIN.collidepoint(p): action()
+                    continue
+                if g.phase == "result":
+                    if BTN_MAIN.collidepoint(p): g.advance()
+                    continue
+                if BTN_MAIN.collidepoint(p): g.confirm()
+                elif g.last and BTN_KEEP.collidepoint(p): g.confirm(keep=True)
+                for i, r in enumerate(AL_R):
+                    if r.inflate(0, 6).collidepoint(p): drag = ("a", i); set_alloc(AL[i][0], sval(r, p[0]))
+                if g.alloc["stock"] > 0:
+                    for i, r in enumerate(SUB_R):
+                        if r.collidepoint(p): drag = ("s", i); set_sub(i, sval(r, p[0]))
+            elif ev.type == pygame.MOUSEBUTTONUP: drag = None
+            elif ev.type == pygame.MOUSEMOTION and drag and g.phase == "allocate" and tab == 0:
+                if drag[0] == "a": set_alloc(AL[drag[1]][0], sval(AL_R[drag[1]], ev.pos[0]))
+                else: set_sub(drag[1], sval(SUB_R[drag[1]], ev.pos[0]))
+        draw_scene(t, dt); draw_right()
+        if g.phase == "event": draw_popup()
+        pygame.display.flip()
+
+if __name__ == "__main__":
+    main()
